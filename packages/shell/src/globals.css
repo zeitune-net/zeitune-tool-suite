@@ -1,0 +1,160 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* ── Light theme — clean white + cool gray surfaces ─────────────────── */
+  /* z-bg=#ffffff  z-surface=#f8f8f9  z-surface-2=#f0f0f2
+     z-surface-3=#e8e8ec  z-border=#e2e2e6  z-border-subtle=#ececf0 */
+  :root {
+    --background: 240 4% 97.5%;     /* #f8f8f9 — surface as base */
+    --foreground: 240 6% 10%;       /* #1a1a1e */
+    --card: 0 0% 100%;              /* #ffffff — white cards */
+    --card-foreground: 240 6% 10%;
+    --card-selected: 90 12% 94%;    /* subtle green tint */
+    --primary: 88 72% 34%;          /* #5a9a1f — darker Zeitune green */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 100%;         /* #ffffff — sidebar/titlebar */
+    --secondary-foreground: 240 6% 10%;
+    --muted: 240 4% 91%;            /* #e8e8ec — surface-3 */
+    --muted-foreground: 240 4% 44%; /* #6e6e78 */
+    --accent: 240 4% 91%;
+    --accent-foreground: 240 6% 10%;
+    --destructive: 0 72% 51%;       /* #dc2626 */
+    --destructive-foreground: 0 0% 98%;
+    --warning: 46 96% 40%;          /* #ca8a04 */
+    --info: 217 91% 53%;            /* #2563eb */
+    --purple: 263 70% 50%;          /* #7c3aed */
+    --border: 240 5% 89%;           /* #e2e2e6 — solid border */
+    --border-hi: 240 5% 83%;        /* #d0d0d6 — border strong */
+    --input: 240 4% 94%;            /* #f0f0f2 — surface-2 */
+    --ring: 88 72% 34%;
+    --radius: 9px;
+    --sidebar: 0 0% 100%;
+    --sidebar-foreground: 240 4% 44%;
+    --sidebar-active: 88 72% 34%;
+    --header-bg: 0 0% 100% / 0.92;
+    --shadow-primary: 88 60% 34% / 0.06;
+    --shadow-primary-hover: 88 60% 34% / 0.12;
+  }
+
+  /* ── Dark theme — zinc-black + Zeitune green ────────────────────────── */
+  /* z-black=#0a0a0a  z-surface=#111113  z-surface-2=#18181b
+     z-surface-3=#222225  z-border-subtle=#1e1e22  z-border=#2a2a2e */
+  .dark {
+    --background: 240 5% 7.5%;      /* #111113 — zone content = surface */
+    --foreground: 240 5% 90%;       /* #e4e4e7 */
+    --card: 240 4% 10%;             /* #18181b — surface-2, cartes/inputs */
+    --card-foreground: 240 5% 90%;
+    --card-selected: 240 4% 13.5%;  /* #222225 — surface-3 */
+    --primary: 88 56% 51%;          /* #8DC63F — Zeitune green */
+    --primary-foreground: 0 0% 4%;  /* noir sur vert */
+    --secondary: 240 6% 4%;         /* #0a0a0a — sidebar+titlebar = z-black */
+    --secondary-foreground: 240 5% 90%;
+    --muted: 240 4% 13.5%;          /* #222225 — surface-3, hover */
+    --muted-foreground: 240 4% 48%; /* #71717a */
+    --accent: 240 4% 13.5%;
+    --accent-foreground: 240 5% 90%;
+    --destructive: 0 84% 60%;       /* #ef4444 */
+    --destructive-foreground: 0 0% 98%;
+    --warning: 48 96% 53%;          /* #eab308 */
+    --info: 217 91% 60%;            /* #3b82f6 */
+    --purple: 270 35% 60%;          /* #9b7bbf */
+    --border: 240 4% 13%;           /* #1e1e22 — border-subtle (separateurs) */
+    --border-hi: 240 4% 18%;        /* #2a2a2e — border (cartes/boutons) */
+    --input: 240 4% 10%;            /* #18181b */
+    --ring: 88 56% 51%;
+    --radius: 9px;
+    --sidebar: 240 6% 4%;           /* #0a0a0a — z-black */
+    --sidebar-foreground: 240 4% 36%; /* #52525b */
+    --sidebar-active: 88 56% 51%;
+    --header-bg: 240 6% 4% / 0.92;  /* titlebar = z-black */
+    --shadow-primary: 88 50% 45% / 0.06;
+    --shadow-primary-hover: 88 50% 45% / 0.12;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.20);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.35);
+}
+
+/* Electron drag region */
+.drag-region {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Monospace utility */
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Zeitune brand text */
+.text-gradient {
+  color: hsl(var(--primary));
+  font-weight: 600;
+}
+
+/* Zeitune primary button — subtle shadow */
+.btn-glow {
+  box-shadow: 0 1px 3px hsl(var(--shadow-primary));
+  transition: all 0.15s;
+}
+.btn-glow:hover {
+  box-shadow: 0 2px 8px hsl(var(--shadow-primary-hover));
+}
+
+/* Active press effect */
+.press-effect:active {
+  transform: scale(0.97);
+}
+
+/* Backdrop blur header */
+.header-blur {
+  background: hsl(var(--header-bg));
+  backdrop-filter: blur(16px);
+}
+
+/* Toast animations */
+@keyframes slide-in-from-right {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.animate-in {
+  animation-fill-mode: both;
+}
+.slide-in-from-right-full {
+  animation-name: slide-in-from-right;
+}
+.fade-in {
+  animation-name: slide-in-from-right;
+}
+.duration-200 {
+  animation-duration: 200ms;
+}

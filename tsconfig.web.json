@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ESNext",
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "jsx": "react-jsx",
+    "outDir": "./out",
+    "rootDir": ".",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "paths": {
+      "@shell/*": ["./packages/shell/src/*"],
+      "@shared/*": ["./packages/shared/src/*"],
+      "@git-manager/*": ["./packages/git-manager/src/*"],
+      "@dev-manager/*": ["./packages/dev-manager/src/*"],
+      "@db-explorer/*": ["./packages/db-explorer/src/*"]
+    }
+  },
+  "include": [
+    "packages/**/*.ts",
+    "packages/**/*.tsx",
+    "*.d.ts"
+  ]
+}

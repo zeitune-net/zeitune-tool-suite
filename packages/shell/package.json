@@ -1,0 +1,7 @@
+{
+  "name": "@zeitune-tools/shell",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/main.tsx",
+  "types": "./src/main.tsx"
+}
