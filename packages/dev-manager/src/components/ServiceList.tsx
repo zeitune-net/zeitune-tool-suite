@@ -175,11 +175,6 @@ export function ServiceList() {
                         <Circle className={cn('h-2.5 w-2.5 shrink-0', statusDotClass[svc.status])} />
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium">{svc.config.name}</p>
-                          <p className="truncate text-[10px] text-muted-foreground">
-                            {svc.status === 'error' && svc.error
-                              ? svc.error
-                              : svc.config.command}
-                          </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">

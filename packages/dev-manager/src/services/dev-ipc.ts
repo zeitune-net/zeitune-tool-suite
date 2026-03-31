@@ -36,6 +36,9 @@ export const importDevProfile = () =>
 export const scanServices = (rootPath: string) =>
   invoke<ServiceScanResult[]>('dev:scan', rootPath)
 
+export const detectService = (dirPath: string) =>
+  invoke<ServiceScanResult | null>('dev:detect', dirPath)
+
 // ── Service Lifecycle ─────────────────────────────────────────────────────
 
 export const startService = (profileId: string, serviceId: string) =>

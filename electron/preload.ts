@@ -52,6 +52,7 @@ const INVOKE_CHANNELS = [
   'dev:profile:export',
   'dev:profile:import',
   'dev:scan',
+  'dev:detect',
   'dev:service:start',
   'dev:service:stop',
   'dev:service:restart',

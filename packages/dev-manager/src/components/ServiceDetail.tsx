@@ -91,7 +91,9 @@ export function ServiceDetail() {
                 </a>
               )}
             </div>
-            <p className="text-[10px] text-muted-foreground">{svc.config.workingDir}</p>
+            {svc.status === 'error' && svc.error && (
+              <p className="text-[10px] text-red-400">{svc.error}</p>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-1.5">

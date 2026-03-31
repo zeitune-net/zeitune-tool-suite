@@ -830,6 +830,10 @@ export function registerDevHandlers(): void {
     return scanDirectory(rootPath)
   })
 
+  ipcMain.handle('dev:detect', async (_e, dirPath: string) => {
+    return detectService(dirPath)
+  })
+
   // ── Service Lifecycle ───────────────────────────────────────────────────
 
   ipcMain.handle('dev:service:start', async (_e, profileId: string, serviceId: string) => {

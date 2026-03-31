@@ -4,7 +4,7 @@ import { Button } from '@shared/components/ui/button'
 import { Badge } from '@shared/components/ui/badge'
 import { cn } from '@shared/lib/utils'
 import { useDevManagerStore } from '../store'
-import { openDirectoryDialog } from '../services/dev-ipc'
+import { openDirectoryDialog, detectService } from '../services/dev-ipc'
 import { ServiceConfigEditor } from './ServiceConfigEditor'
 import type { ServiceScanResult, ServiceConfig, ServiceType } from '../types'
 
@@ -242,7 +242,11 @@ export function ProfileWizard() {
     const dir = await openDirectoryDialog()
     const workingDir = dir || rootPath
     const folderName = workingDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || ''
-    const service = { ...newEmptyService(workingDir), name: dir ? folderName : '' }
+    // Try to auto-detect service type
+    const detected = dir ? await detectService(workingDir) : null
+    const service = detected
+      ? scanResultToConfig(detected)
+      : { ...newEmptyService(workingDir), name: dir ? folderName : '' }
     setServiceConfigs([...serviceConfigs, service])
     setEditingIndex(serviceConfigs.length)
   }
