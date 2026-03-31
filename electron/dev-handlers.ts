@@ -75,6 +75,28 @@ async function saveProfiles(profiles: DevProfile[]): Promise<void> {
   await writeFile(profilesPath(), JSON.stringify(profiles, null, 2), 'utf-8')
 }
 
+// ── Runtime State Persistence ───────────────────────────────────────────────
+
+interface RuntimeSnapshot {
+  activeProfileId: string | null
+  services: Record<string, { id: string; status: string; startedAt?: number }[]>
+}
+
+const runtimeStatePath = () => join(app.getPath('userData'), 'dev-runtime-state.json')
+
+async function loadRuntimeState(): Promise<RuntimeSnapshot | null> {
+  try {
+    const data = await readFile(runtimeStatePath(), 'utf-8')
+    return JSON.parse(data)
+  } catch {
+    return null
+  }
+}
+
+async function saveRuntimeState(snapshot: RuntimeSnapshot): Promise<void> {
+  await writeFile(runtimeStatePath(), JSON.stringify(snapshot, null, 2), 'utf-8')
+}
+
 // ── Process Management ──────────────────────────────────────────────────────
 
 const processes = new Map<string, ManagedProcess>()
@@ -1185,9 +1207,49 @@ export function registerDevHandlers(): void {
     return result
   })
 
+  // ── Runtime State Persistence IPC ─────────────────────────────────────────
+
+  ipcMain.handle('dev:runtime:load', async () => {
+    return loadRuntimeState()
+  })
+
+  ipcMain.handle('dev:runtime:save', async (_e, snapshot: RuntimeSnapshot) => {
+    await saveRuntimeState(snapshot)
+  })
+
   // ── Cleanup on Quit ─────────────────────────────────────────────────────
 
   app.on('before-quit', async () => {
+    // Persist snapshot of managed processes before killing them
+    const snapshot: RuntimeSnapshot = { activeProfileId: null, services: {} }
+    for (const [, managed] of processes) {
+      if (!snapshot.services[managed.profileId]) {
+        snapshot.services[managed.profileId] = []
+      }
+      snapshot.services[managed.profileId].push({
+        id: managed.serviceId,
+        status: 'running',
+        startedAt: managed.startedAt
+      })
+    }
+
+    // Merge with last saved snapshot to preserve activeProfileId
+    try {
+      const existing = await loadRuntimeState()
+      if (existing) {
+        snapshot.activeProfileId = existing.activeProfileId
+        // Merge services from snapshot that aren't in current processes
+        for (const [profileId, svcs] of Object.entries(existing.services)) {
+          if (!snapshot.services[profileId]) {
+            snapshot.services[profileId] = svcs
+          }
+        }
+      }
+    } catch { /* ignore */ }
+
+    await saveRuntimeState(snapshot)
+
+    // Then kill all processes
     const keys = Array.from(processes.keys())
     await Promise.all(keys.map((key) => killProcess(key)))
   })

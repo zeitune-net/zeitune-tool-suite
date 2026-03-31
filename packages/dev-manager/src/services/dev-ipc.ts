@@ -87,6 +87,19 @@ export const probeServices = (profileId: string) =>
 export const listManagedProcesses = (profileId: string) =>
   invoke<{ serviceId: string; pid: number; startedAt: number }[]>('dev:process:list', profileId)
 
+// ── Runtime State Persistence ─────────────────────────────────────────────
+
+export interface RuntimeSnapshot {
+  activeProfileId: string | null
+  services: Record<string, { id: string; status: string; startedAt?: number }[]>
+}
+
+export const loadRuntimeState = () =>
+  invoke<RuntimeSnapshot | null>('dev:runtime:load')
+
+export const saveRuntimeState = (snapshot: RuntimeSnapshot) =>
+  invoke<void>('dev:runtime:save', snapshot)
+
 // ── Shell Actions ────────────────────────────────────────────────────────
 
 export const openInTerminal = (dirPath: string) =>

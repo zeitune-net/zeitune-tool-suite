@@ -90,6 +90,9 @@ interface DevManagerStore {
   exportProfile: () => Promise<void>
   importProfile: () => Promise<void>
 
+  // Persistence
+  persistRuntimeState: () => Promise<void>
+
   // IPC listeners
   ipcListenersInitialized: boolean
   initIpcListeners: () => void
@@ -126,8 +129,42 @@ export const useDevManagerStore = create<DevManagerStore>()((set, get) => ({
   loadProfiles: async () => {
     const profiles = await devIpc.listDevProfiles()
     set({ profiles })
+
+    // Restore runtime state from previous session
+    try {
+      const snapshot = await devIpc.loadRuntimeState()
+      if (snapshot) {
+        // Restore runtimeCache from snapshot (status hints, no logs)
+        const restoredCache: Record<string, ServiceRuntime[]> = {}
+        for (const [profileId, savedServices] of Object.entries(snapshot.services)) {
+          const profile = profiles.find((p) => p.id === profileId)
+          if (!profile) continue
+          restoredCache[profileId] = profile.services.map((config) => {
+            const saved = savedServices.find((s) => s.id === config.id)
+            return {
+              id: config.id,
+              config,
+              // Managed processes were killed on quit — probe will reconcile
+              status: 'stopped' as const,
+              logs: [],
+              healthStatus: 'unknown' as const,
+              startedAt: saved?.startedAt
+            }
+          })
+        }
+        set({ runtimeCache: restoredCache })
+
+        // Restore active profile from snapshot
+        if (snapshot.activeProfileId && profiles.some((p) => p.id === snapshot.activeProfileId)) {
+          await get().setActiveProfile(snapshot.activeProfileId)
+          return
+        }
+      }
+    } catch { /* ignore — first launch or corrupted file */ }
+
+    // Fallback: pick first profile
     if (!get().activeProfileId && profiles.length > 0) {
-      get().setActiveProfile(profiles[0].id)
+      await get().setActiveProfile(profiles[0].id)
     }
   },
 
@@ -673,6 +710,33 @@ export const useDevManagerStore = create<DevManagerStore>()((set, get) => ({
       set({ profiles })
       toast.success('Profil importé')
     }
+  },
+
+  // ── Runtime State Persistence ────────────────────────────────────────────
+
+  persistRuntimeState: async () => {
+    const { activeProfileId, services, runtimeCache } = get()
+    // Build snapshot: merge active services with cache
+    const allServices: Record<string, { id: string; status: string; startedAt?: number }[]> = {}
+    // Cache entries (non-active profiles)
+    for (const [profileId, cached] of Object.entries(runtimeCache)) {
+      allServices[profileId] = cached.map((s) => ({
+        id: s.id,
+        status: s.status,
+        startedAt: s.startedAt
+      }))
+    }
+    // Active profile services (overwrite cache entry if any)
+    if (activeProfileId) {
+      allServices[activeProfileId] = services.map((s) => ({
+        id: s.id,
+        status: s.status,
+        startedAt: s.startedAt
+      }))
+    }
+    try {
+      await devIpc.saveRuntimeState({ activeProfileId, services: allServices })
+    } catch { /* ignore */ }
   },
 
   // ── IPC Listeners ───────────────────────────────────────────────────────

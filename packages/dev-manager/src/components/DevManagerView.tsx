@@ -12,6 +12,7 @@ import { ServiceDetail } from './ServiceDetail'
 import { LogPanel } from './LogPanel'
 
 const PROBE_INTERVAL = 15_000 // 15 seconds
+const PERSIST_INTERVAL = 30_000 // 30 seconds
 
 export function DevManagerView() {
   const {
@@ -21,7 +22,8 @@ export function DevManagerView() {
     initIpcListeners,
     logPanelOpen,
     setLogPanelOpen,
-    probeServices
+    probeServices,
+    persistRuntimeState
   } = useDevManagerStore()
 
   // Initialize IPC listeners once
@@ -35,6 +37,17 @@ export function DevManagerView() {
     const interval = setInterval(probeServices, PROBE_INTERVAL)
     return () => clearInterval(interval)
   }, [activeProfileId, probeServices])
+
+  // Periodic persistence of runtime state + save before window unload
+  useEffect(() => {
+    const interval = setInterval(persistRuntimeState, PERSIST_INTERVAL)
+    const onBeforeUnload = () => persistRuntimeState()
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('beforeunload', onBeforeUnload)
+    }
+  }, [persistRuntimeState])
 
   const hasLogs = services.some((s) => s.logs.length > 0)
 

@@ -64,7 +64,9 @@ const INVOKE_CHANNELS = [
   'dev:port:checkBatch',
   'dev:docker:health',
   'dev:service:probe',
-  'dev:process:list'
+  'dev:process:list',
+  'dev:runtime:load',
+  'dev:runtime:save'
 ]
 
 contextBridge.exposeInMainWorld('electron', {
