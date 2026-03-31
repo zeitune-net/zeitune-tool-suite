@@ -126,4 +126,33 @@ export interface BatchOperationResult {
 
 export type ViewMode = 'dashboard' | 'detail'
 
-export type DetailTab = 'changes' | 'branches' | 'log' | 'stash'
+export type DetailTab = 'changes' | 'branches' | 'log' | 'stash' | 'settings'
+
+// ── Repo settings ─────────────────────────────────────────────────────────
+
+export interface RemoteInfo {
+  name: string
+  fetchUrl: string
+  pushUrl: string
+}
+
+export interface BranchTracking {
+  local: string
+  remote: string | null    // e.g. "origin/main"
+  remoteName: string | null // e.g. "origin"
+  remoteBranch: string | null // e.g. "main"
+  gone: boolean
+}
+
+export interface RepoConfigResult {
+  remotes: RemoteInfo[]
+  branches: BranchTracking[]
+  userName: string | null
+  userEmail: string | null
+  globalUserName: string | null
+  globalUserEmail: string | null
+  defaultBranch: string | null
+  isBare: boolean
+  worktree: string
+  gitDir: string
+}

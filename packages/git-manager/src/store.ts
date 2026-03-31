@@ -6,7 +6,8 @@ import type {
   ScanResult,
   ViewMode,
   DetailTab,
-  BatchOperationResult
+  BatchOperationResult,
+  RepoConfigResult
 } from './types'
 import * as gitIpc from './services/git-ipc'
 
@@ -67,6 +68,11 @@ interface GitManagerStore {
   batchPush: (branch?: string) => Promise<void>
   batchCheckout: (branch: string) => Promise<void>
   batchCommit: (message: string) => Promise<void>
+
+  // ── Repo config / settings ────────────────────────────────────────────────
+  repoConfig: RepoConfigResult | null
+  repoConfigLoading: boolean
+  loadRepoConfig: (repoPath: string) => Promise<void>
 
   // ── Single repo operations ───────────────────────────────────────────────
   operationLoading: string | null // repoPath currently loading
@@ -332,7 +338,8 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
     set({
       activeRepoPath: repoPath,
       viewMode: repoPath ? 'detail' : 'dashboard',
-      detailTab: 'changes'
+      detailTab: 'changes',
+      repoConfig: null
     })
   },
 
@@ -556,6 +563,22 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
     if (fail === 0) toast.success(`Commit : ${ok} repos`)
     else toast.warning(`Commit : ${ok} OK, ${fail} erreurs`)
     get().refreshAllRepos()
+  },
+
+  // ── Repo config / settings ────────────────────────────────────────────────
+
+  repoConfig: null,
+  repoConfigLoading: false,
+
+  loadRepoConfig: async (repoPath) => {
+    set({ repoConfigLoading: true })
+    try {
+      const config = await gitIpc.getRepoConfig(repoPath)
+      set({ repoConfig: config, repoConfigLoading: false })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur chargement config repo')
+      set({ repoConfigLoading: false })
+    }
   },
 
   // ── Single repo operations ───────────────────────────────────────────────

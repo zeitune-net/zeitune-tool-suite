@@ -45,6 +45,16 @@ const INVOKE_CHANNELS = [
   'git:stashPop',
   'git:stashDrop',
   'git:log',
+  // Repo config & settings
+  'git:repoConfig',
+  'git:setConfig',
+  'git:unsetConfig',
+  'git:addRemote',
+  'git:removeRemote',
+  'git:setRemoteUrl',
+  'git:renameRemote',
+  'git:setBranchUpstream',
+  'git:unsetBranchUpstream',
   // Shell actions
   'shell:openInTerminal',
   'shell:openInExplorer',

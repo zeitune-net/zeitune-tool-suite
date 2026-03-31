@@ -9,7 +9,8 @@ import {
   Archive,
   Loader2,
   Terminal,
-  FolderOpen
+  FolderOpen,
+  Settings
 } from 'lucide-react'
 import { Button } from '@shared/components/ui/button'
 import { Badge } from '@shared/components/ui/badge'
@@ -23,13 +24,15 @@ import { StashPanel } from './StashPanel'
 import { CommitPanel } from './CommitPanel'
 import { ConflictPanel } from './ConflictPanel'
 import { DiffViewer } from './DiffViewer'
+import { RepoSettingsPanel } from './RepoSettingsPanel'
 import type { DetailTab } from '../types'
 
 const tabs: { id: DetailTab; label: string; icon: React.ReactNode }[] = [
   { id: 'changes', label: 'Changes', icon: <FileText className="h-3.5 w-3.5" /> },
   { id: 'branches', label: 'Branches', icon: <GitBranch className="h-3.5 w-3.5" /> },
   { id: 'log', label: 'Log', icon: <History className="h-3.5 w-3.5" /> },
-  { id: 'stash', label: 'Stash', icon: <Archive className="h-3.5 w-3.5" /> }
+  { id: 'stash', label: 'Stash', icon: <Archive className="h-3.5 w-3.5" /> },
+  { id: 'settings', label: 'Settings', icon: <Settings className="h-3.5 w-3.5" /> }
 ]
 
 export function RepoDetail() {
@@ -190,6 +193,7 @@ export function RepoDetail() {
           {detailTab === 'branches' && <BranchPanel repo={repo} />}
           {detailTab === 'log' && <LogPanel repo={repo} />}
           {detailTab === 'stash' && <StashPanel repo={repo} />}
+          {detailTab === 'settings' && <RepoSettingsPanel repo={repo} />}
         </div>
 
         {/* Right: diff viewer */}

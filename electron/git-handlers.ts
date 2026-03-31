@@ -518,6 +518,142 @@ export function registerGitHandlers(): void {
     return { entries }
   })
 
+  // ── Repo config & settings ──────────────────────────────────────────────
+
+  ipcMain.handle('git:repoConfig', async (_e, repoPath: string) => {
+    // Remotes
+    const remotesRaw = await gitSafe(repoPath, ['remote'])
+    const remoteNames = remotesRaw ? remotesRaw.split('\n').filter(Boolean) : []
+    const remotes = await Promise.all(
+      remoteNames.map(async (name) => {
+        const fetchUrl = await gitSafe(repoPath, ['remote', 'get-url', name])
+        const pushUrl = await gitSafe(repoPath, ['remote', 'get-url', '--push', name])
+        return { name, fetchUrl: fetchUrl || '', pushUrl: pushUrl || fetchUrl || '' }
+      })
+    )
+
+    // Branch tracking
+    const branchRaw = await gitSafe(repoPath, [
+      'for-each-ref',
+      '--format=%(refname:short)||%(upstream:short)||%(upstream:remotename)||%(upstream:remoteref:short)||%(upstream:track)',
+      'refs/heads/'
+    ])
+    const branches = branchRaw
+      ? branchRaw.split('\n').filter(Boolean).map((line) => {
+          const [local, upstream, remoteName, remoteBranch, track] = line.split('||')
+          return {
+            local,
+            remote: upstream || null,
+            remoteName: remoteName || null,
+            remoteBranch: remoteBranch || null,
+            gone: track ? track.includes('gone') : false
+          }
+        })
+      : []
+
+    // Local user config
+    const userName = (await gitSafe(repoPath, ['config', '--local', 'user.name'])) || null
+    const userEmail = (await gitSafe(repoPath, ['config', '--local', 'user.email'])) || null
+
+    // Global user config (fallback)
+    const globalUserName = (await gitSafe(repoPath, ['config', '--global', 'user.name'])) || null
+    const globalUserEmail = (await gitSafe(repoPath, ['config', '--global', 'user.email'])) || null
+
+    // Default branch
+    const defaultBranch = (await gitSafe(repoPath, ['config', 'init.defaultBranch'])) || null
+
+    // Repo metadata
+    const isBareRaw = await gitSafe(repoPath, ['rev-parse', '--is-bare-repository'])
+    const isBare = isBareRaw === 'true'
+    const worktree = await gitSafe(repoPath, ['rev-parse', '--show-toplevel'])
+    const gitDir = await gitSafe(repoPath, ['rev-parse', '--git-dir'])
+
+    return {
+      remotes,
+      branches,
+      userName,
+      userEmail,
+      globalUserName,
+      globalUserEmail,
+      defaultBranch,
+      isBare,
+      worktree,
+      gitDir
+    }
+  })
+
+  ipcMain.handle(
+    'git:setConfig',
+    async (_e, repoPath: string, key: string, value: string, global: boolean = false) => {
+      const args = ['config', global ? '--global' : '--local', key, value]
+      await git(repoPath, args)
+      return true
+    }
+  )
+
+  ipcMain.handle(
+    'git:unsetConfig',
+    async (_e, repoPath: string, key: string, global: boolean = false) => {
+      try {
+        await git(repoPath, ['config', global ? '--global' : '--local', '--unset', key])
+      } catch {
+        // ignore if key doesn't exist
+      }
+      return true
+    }
+  )
+
+  ipcMain.handle(
+    'git:addRemote',
+    async (_e, repoPath: string, name: string, url: string) => {
+      await git(repoPath, ['remote', 'add', name, url])
+      return true
+    }
+  )
+
+  ipcMain.handle(
+    'git:removeRemote',
+    async (_e, repoPath: string, name: string) => {
+      await git(repoPath, ['remote', 'remove', name])
+      return true
+    }
+  )
+
+  ipcMain.handle(
+    'git:setRemoteUrl',
+    async (_e, repoPath: string, name: string, url: string, push: boolean = false) => {
+      const args = ['remote', 'set-url']
+      if (push) args.push('--push')
+      args.push(name, url)
+      await git(repoPath, args)
+      return true
+    }
+  )
+
+  ipcMain.handle(
+    'git:renameRemote',
+    async (_e, repoPath: string, oldName: string, newName: string) => {
+      await git(repoPath, ['remote', 'rename', oldName, newName])
+      return true
+    }
+  )
+
+  ipcMain.handle(
+    'git:setBranchUpstream',
+    async (_e, repoPath: string, localBranch: string, upstream: string) => {
+      await git(repoPath, ['branch', `--set-upstream-to=${upstream}`, localBranch])
+      return true
+    }
+  )
+
+  ipcMain.handle(
+    'git:unsetBranchUpstream',
+    async (_e, repoPath: string, localBranch: string) => {
+      await git(repoPath, ['branch', '--unset-upstream', localBranch])
+      return true
+    }
+  )
+
   // ── Shell actions ─────────────────────────────────────────────────────────
 
   ipcMain.handle('shell:openInTerminal', async (_e, dirPath: string) => {

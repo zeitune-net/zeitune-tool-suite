@@ -7,7 +7,8 @@ import type {
   StashListResult,
   MergeResult,
   PullResult,
-  PushResult
+  PushResult,
+  RepoConfigResult
 } from '../types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -103,6 +104,27 @@ export const stashDrop = (repoPath: string, index: number) =>
 
 export const getLog = (repoPath: string, count?: number) =>
   invoke<LogResult>('git:log', repoPath, count)
+
+// ── Repo config & settings ────────────────────────────────────────────────
+
+export const getRepoConfig = (repoPath: string) =>
+  invoke<RepoConfigResult>('git:repoConfig', repoPath)
+export const setConfig = (repoPath: string, key: string, value: string, global: boolean = false) =>
+  invoke<boolean>('git:setConfig', repoPath, key, value, global)
+export const unsetConfig = (repoPath: string, key: string, global: boolean = false) =>
+  invoke<boolean>('git:unsetConfig', repoPath, key, global)
+export const addRemote = (repoPath: string, name: string, url: string) =>
+  invoke<boolean>('git:addRemote', repoPath, name, url)
+export const removeRemote = (repoPath: string, name: string) =>
+  invoke<boolean>('git:removeRemote', repoPath, name)
+export const setRemoteUrl = (repoPath: string, name: string, url: string, push: boolean = false) =>
+  invoke<boolean>('git:setRemoteUrl', repoPath, name, url, push)
+export const renameRemote = (repoPath: string, oldName: string, newName: string) =>
+  invoke<boolean>('git:renameRemote', repoPath, oldName, newName)
+export const setBranchUpstream = (repoPath: string, localBranch: string, upstream: string) =>
+  invoke<boolean>('git:setBranchUpstream', repoPath, localBranch, upstream)
+export const unsetBranchUpstream = (repoPath: string, localBranch: string) =>
+  invoke<boolean>('git:unsetBranchUpstream', repoPath, localBranch)
 
 // ── Shell actions ─────────────────────────────────────────────────────────
 
