@@ -149,6 +149,22 @@ async function saveProfiles(profiles: Profile[]): Promise<void> {
   await writeFile(profilesPath(), JSON.stringify(profiles, null, 2), 'utf-8')
 }
 
+const activeProfilePath = () => join(app.getPath('userData'), 'git-active-profile.json')
+
+async function loadActiveProfileId(): Promise<string | null> {
+  try {
+    const data = await readFile(activeProfilePath(), 'utf-8')
+    const parsed = JSON.parse(data)
+    return parsed.activeProfileId ?? null
+  } catch {
+    return null
+  }
+}
+
+async function saveActiveProfileId(id: string | null): Promise<void> {
+  await writeFile(activeProfilePath(), JSON.stringify({ activeProfileId: id }), 'utf-8')
+}
+
 // ── Register all IPC handlers ────────────────────────────────────────────────
 
 export function registerGitHandlers(): void {
@@ -187,6 +203,14 @@ export function registerGitHandlers(): void {
     profiles = profiles.filter((p) => p.id !== profileId)
     await saveProfiles(profiles)
     return profiles
+  })
+
+  ipcMain.handle('profile:getActive', async () => {
+    return loadActiveProfileId()
+  })
+
+  ipcMain.handle('profile:setActive', async (_e, id: string | null) => {
+    await saveActiveProfileId(id)
   })
 
   // ── Scan for git repos ───────────────────────────────────────────────────

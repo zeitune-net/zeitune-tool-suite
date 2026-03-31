@@ -64,21 +64,23 @@ function FileItem({
   return (
     <div
       className={cn(
-        'group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 hover:bg-muted/50',
+        'group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 hover:bg-muted/50 min-w-0',
         selected && 'bg-primary/10 ring-1 ring-primary/30'
       )}
       onClick={() => onSelect(path, type)}
     >
       {fileIcon(status)}
-      <span
-        className="flex-1 truncate text-left text-xs font-mono"
-        title={path}
-      >
-        {fileName}
-      </span>
-      <span className="text-[9px] text-muted-foreground">{path !== fileName ? path : ''}</span>
+      <div className="flex min-w-0 flex-1 items-baseline gap-1">
+        <span
+          className="truncate text-left text-xs font-mono"
+          title={path}
+        >
+          {fileName}
+        </span>
+        <span className="truncate text-[9px] text-muted-foreground">{path !== fileName ? path : ''}</span>
+      </div>
 
-      <div className="hidden items-center gap-0.5 group-hover:flex">
+      <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
         {type === 'staged' && (
           <>
             <button

@@ -26,6 +26,8 @@ export const openDirectoryDialog = () => invoke<string | null>('dialog:openDirec
 export const listProfiles = () => invoke<Profile[]>('profile:list')
 export const saveProfile = (profile: Profile) => invoke<Profile[]>('profile:save', profile)
 export const deleteProfile = (profileId: string) => invoke<Profile[]>('profile:delete', profileId)
+export const getActiveProfileId = () => invoke<string | null>('profile:getActive')
+export const setActiveProfileId = (id: string | null) => invoke<void>('profile:setActive', id)
 
 // ── Scan ───────────────────────────────────────────────────────────────────
 

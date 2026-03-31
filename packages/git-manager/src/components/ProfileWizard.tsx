@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { X, FolderOpen, Search, Check, Loader2 } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import { X, FolderOpen, Search, Check, Loader2, RotateCcw, Plus } from 'lucide-react'
 import { Button } from '@shared/components/ui/button'
 import { Badge } from '@shared/components/ui/badge'
 import { cn } from '@shared/lib/utils'
@@ -10,18 +10,82 @@ import type { ScanResult } from '../types'
 type Step = 'config' | 'scan' | 'select'
 
 export function ProfileWizard() {
-  const { wizardOpen, setWizardOpen, scanning, scanResults, scanDirectory, createProfile } =
-    useGitManagerStore()
+  const {
+    wizardOpen,
+    editingProfileId,
+    profiles,
+    scanning,
+    scanResults,
+    scanDirectory,
+    createProfile,
+    updateProfile,
+    setWizardOpen
+  } = useGitManagerStore()
+
+  const isEditing = editingProfileId !== null
+  const editingProfile = isEditing ? profiles.find((p) => p.id === editingProfileId) : null
 
   const [step, setStep] = useState<Step>('config')
   const [name, setName] = useState('')
   const [rootPath, setRootPath] = useState('')
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
+  const [manualRepos, setManualRepos] = useState<ScanResult[]>([])
+  const [hasScanned, setHasScanned] = useState(false)
 
-  // Pre-select all repos once scan results arrive
+  // Combine scan results + manual repos (deduplicated)
+  const allRepos = useMemo(() => {
+    const scannedPaths = new Set(scanResults.map((r) => r.path))
+    const extra = manualRepos.filter((m) => !scannedPaths.has(m.path))
+    return [...scanResults, ...extra]
+  }, [scanResults, manualRepos])
+
+  // Initialize form when editing
+  useEffect(() => {
+    if (wizardOpen && editingProfile) {
+      setName(editingProfile.name)
+      setRootPath(editingProfile.rootPath)
+      setSelectedPaths(new Set(editingProfile.repoPaths))
+      setManualRepos([])
+      setStep('config')
+      setHasScanned(false)
+    }
+  }, [wizardOpen, editingProfile])
+
+  // When scan completes, update selections
   useEffect(() => {
     if (step === 'select' && scanResults.length > 0) {
-      setSelectedPaths(new Set(scanResults.map((r: ScanResult) => r.path)))
+      if (isEditing && editingProfile) {
+        const existingPaths = new Set(editingProfile.repoPaths)
+        const allPaths = new Set(scanResults.map((r: ScanResult) => r.path))
+        if (!hasScanned) {
+          setSelectedPaths(allPaths)
+        } else {
+          setSelectedPaths((prev) => {
+            const next = new Set(prev)
+            for (const p of allPaths) {
+              if (!existingPaths.has(p) && !prev.has(p)) {
+                next.add(p)
+              }
+            }
+            for (const p of next) {
+              if (!allPaths.has(p) && !manualRepos.some((m) => m.path === p)) {
+                next.delete(p)
+              }
+            }
+            return next
+          })
+        }
+        setHasScanned(true)
+      } else {
+        setSelectedPaths((prev) => {
+          const next = new Set(scanResults.map((r: ScanResult) => r.path))
+          // Keep manually added selections
+          for (const m of manualRepos) {
+            if (prev.has(m.path)) next.add(m.path)
+          }
+          return next
+        })
+      }
     }
   }, [step, scanResults])
 
@@ -44,6 +108,21 @@ export function ProfileWizard() {
     setStep('select')
   }
 
+  const handleAddManual = async () => {
+    const dir = await openDirectoryDialog()
+    if (!dir) return
+    // Check not already in list
+    if (allRepos.some((r) => r.path === dir)) {
+      // Just select it if it exists
+      setSelectedPaths((prev) => new Set([...prev, dir]))
+      return
+    }
+    const repoName = dir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || dir
+    const newRepo: ScanResult = { path: dir, name: repoName }
+    setManualRepos((prev) => [...prev, newRepo])
+    setSelectedPaths((prev) => new Set([...prev, dir]))
+  }
+
   const toggleRepo = (path: string) => {
     const next = new Set(selectedPaths)
     if (next.has(path)) next.delete(path)
@@ -52,37 +131,48 @@ export function ProfileWizard() {
   }
 
   const toggleAll = () => {
-    if (selectedPaths.size === scanResults.length) {
+    if (selectedPaths.size === allRepos.length) {
       setSelectedPaths(new Set())
     } else {
-      setSelectedPaths(new Set(scanResults.map((r) => r.path)))
+      setSelectedPaths(new Set(allRepos.map((r) => r.path)))
     }
   }
 
-  const handleCreate = () => {
+  const handleSubmit = () => {
     if (!name.trim() || selectedPaths.size === 0) return
-    createProfile(name.trim(), rootPath, Array.from(selectedPaths))
-    // Reset
+    if (isEditing && editingProfileId) {
+      updateProfile(editingProfileId, name.trim(), rootPath, Array.from(selectedPaths))
+    } else {
+      createProfile(name.trim(), rootPath, Array.from(selectedPaths))
+    }
+    resetForm()
+  }
+
+  const resetForm = () => {
     setStep('config')
     setName('')
     setRootPath('')
     setSelectedPaths(new Set())
+    setManualRepos([])
+    setHasScanned(false)
   }
 
   const close = () => {
     setWizardOpen(false)
-    setStep('config')
-    setName('')
-    setRootPath('')
-    setSelectedPaths(new Set())
+    resetForm()
   }
+
+  const isManualRepo = (path: string) =>
+    manualRepos.some((m) => m.path === path) && !scanResults.some((r) => r.path === path)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="w-full max-w-lg rounded-2xl border border-border bg-card shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
-          <h2 className="text-lg font-semibold">Nouveau profil</h2>
+          <h2 className="text-lg font-semibold">
+            {isEditing ? 'Modifier le profil' : 'Nouveau profil'}
+          </h2>
           <button onClick={close} className="rounded-lg p-1 hover:bg-muted">
             <X className="h-4 w-4" />
           </button>
@@ -161,17 +251,40 @@ export function ProfileWizard() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">
-                  <span className="font-medium text-foreground">{scanResults.length}</span> repos
+                  <span className="font-medium text-foreground">{allRepos.length}</span> repos
                   trouves
                 </p>
-                <Button variant="ghost" size="sm" onClick={toggleAll}>
-                  {selectedPaths.size === scanResults.length
-                    ? 'Tout decocher'
-                    : 'Tout cocher'}
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleAddManual}
+                    title="Ajouter un repo manuellement"
+                  >
+                    <Plus className="mr-1 h-3 w-3" />
+                    Ajouter
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setStep('scan')
+                      handleScan()
+                    }}
+                    title="Re-scanner"
+                  >
+                    <RotateCcw className="mr-1 h-3 w-3" />
+                    Re-scanner
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={toggleAll}>
+                    {selectedPaths.size === allRepos.length
+                      ? 'Tout decocher'
+                      : 'Tout cocher'}
+                  </Button>
+                </div>
               </div>
               <div className="max-h-64 space-y-1 overflow-auto rounded-lg border border-border p-1.5">
-                {scanResults.map((repo) => (
+                {allRepos.map((repo) => (
                   <button
                     key={repo.path}
                     onClick={() => toggleRepo(repo.path)}
@@ -195,12 +308,17 @@ export function ProfileWizard() {
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{repo.name}</p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="truncate text-sm font-medium">{repo.name}</p>
+                        {isManualRepo(repo.path) && (
+                          <Badge variant="muted" className="text-[8px] px-1 py-0">manuel</Badge>
+                        )}
+                      </div>
                       <p className="truncate text-[10px] text-muted-foreground">{repo.path}</p>
                     </div>
                   </button>
                 ))}
-                {scanResults.length === 0 && (
+                {allRepos.length === 0 && (
                   <p className="py-6 text-center text-xs text-muted-foreground">
                     Aucun repository Git trouve dans ce repertoire
                   </p>
@@ -229,9 +347,11 @@ export function ProfileWizard() {
             </Button>
           )}
           {step === 'select' && (
-            <Button disabled={selectedPaths.size === 0} onClick={handleCreate}>
+            <Button disabled={selectedPaths.size === 0} onClick={handleSubmit}>
               <Check className="mr-1.5 h-3.5 w-3.5" />
-              Creer le profil ({selectedPaths.size} repos)
+              {isEditing
+                ? `Enregistrer (${selectedPaths.size} repos)`
+                : `Creer le profil (${selectedPaths.size} repos)`}
             </Button>
           )}
         </div>

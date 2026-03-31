@@ -88,7 +88,9 @@ export function DevManagerView() {
       ) : (
         <div className="flex flex-1 overflow-hidden">
           {viewMode === 'detail' ? (
-            <ServiceDetail />
+            <div className="flex-1 overflow-hidden">
+              <ServiceDetail />
+            </div>
           ) : (
             <>
               {/* Service list sidebar */}

@@ -16,6 +16,8 @@ const INVOKE_CHANNELS = [
   'profile:list',
   'profile:save',
   'profile:delete',
+  'profile:getActive',
+  'profile:setActive',
   // Git operations
   'git:scanRepos',
   'git:status',

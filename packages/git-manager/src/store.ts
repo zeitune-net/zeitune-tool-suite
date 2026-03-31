@@ -53,7 +53,10 @@ interface GitManagerStore {
 
   // ── Wizard ───────────────────────────────────────────────────────────────
   wizardOpen: boolean
+  editingProfileId: string | null
   setWizardOpen: (open: boolean) => void
+  openEditProfile: (id: string) => void
+  updateProfile: (profileId: string, name: string, rootPath: string, repoPaths: string[]) => Promise<void>
 
   // ── Batch operations ─────────────────────────────────────────────────────
   batchLoading: boolean
@@ -148,9 +151,12 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
     try {
       const profiles = await gitIpc.listProfiles()
       set({ profiles })
-      // Auto-select first profile if none active
-      if (!get().activeProfileId && profiles.length > 0) {
-        get().setActiveProfile(profiles[0].id)
+      // Restore persisted active profile, fallback to first
+      if (!get().activeProfileId) {
+        const savedId = await gitIpc.getActiveProfileId()
+        const validId = savedId && profiles.some((p) => p.id === savedId) ? savedId : null
+        const targetId = validId || (profiles.length > 0 ? profiles[0].id : null)
+        if (targetId) get().setActiveProfile(targetId)
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erreur chargement des profils')
@@ -159,6 +165,7 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
 
   setActiveProfile: (id) => {
     set({ activeProfileId: id, repositories: [], selectedRepoPaths: [], activeRepoPath: null })
+    gitIpc.setActiveProfileId(id)
     if (id) get().loadRepositories()
   },
 
@@ -172,7 +179,7 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
         createdAt: Date.now()
       }
       const profiles = await gitIpc.saveProfile(profile)
-      set({ profiles, wizardOpen: false })
+      set({ profiles, wizardOpen: false, editingProfileId: null })
       get().setActiveProfile(profile.id)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erreur création du profil')
@@ -362,7 +369,25 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
   // ── Wizard ───────────────────────────────────────────────────────────────
 
   wizardOpen: false,
-  setWizardOpen: (open) => set({ wizardOpen: open }),
+  editingProfileId: null,
+  setWizardOpen: (open) => set({ wizardOpen: open, editingProfileId: null }),
+
+  openEditProfile: (id) => {
+    set({ editingProfileId: id, wizardOpen: true })
+  },
+
+  updateProfile: async (profileId, name, rootPath, repoPaths) => {
+    try {
+      const profile = get().profiles.find((p) => p.id === profileId)
+      if (!profile) return
+      const updated = { ...profile, name, rootPath, repoPaths }
+      const profiles = await gitIpc.saveProfile(updated)
+      set({ profiles, wizardOpen: false, editingProfileId: null })
+      if (get().activeProfileId === profileId) get().loadRepositories()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur mise à jour du profil')
+    }
+  },
 
   // ── Batch operations ─────────────────────────────────────────────────────
 

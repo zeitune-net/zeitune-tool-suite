@@ -158,7 +158,7 @@ export function ServiceDetail() {
       {/* Tab content */}
       <div className="flex-1 overflow-auto p-4">
         {detailTab === 'config' && (
-          <div className="max-w-lg">
+          <div>
             <ServiceConfigEditor
               config={svc.config}
               onChange={handleConfigSave}
@@ -205,7 +205,7 @@ export function ServiceDetail() {
         )}
 
         {detailTab === 'environment' && (
-          <div className="space-y-4 max-w-lg">
+          <div className="space-y-4">
             <div>
               <h3 className="mb-2 text-xs font-medium text-muted-foreground">
                 Variables du service
