@@ -1,12 +1,12 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { ChevronDown, Plus, Trash2, FolderGit2 } from 'lucide-react'
+import { ChevronDown, Plus, Trash2, FolderGit2, Pencil } from 'lucide-react'
 import { Button } from '@shared/components/ui/button'
 import { cn } from '@shared/lib/utils'
 import { useClickOutside } from '@shared/hooks/useClickOutside'
 import { useGitManagerStore } from '../store'
 
 export function ProfileSelector() {
-  const { profiles, activeProfileId, setActiveProfile, deleteProfile, setWizardOpen, loadProfiles } =
+  const { profiles, activeProfileId, setActiveProfile, deleteProfile, setWizardOpen, openEditProfile, loadProfiles } =
     useGitManagerStore()
   const [open, setOpen] = useState(false)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
@@ -95,15 +95,27 @@ export function ProfileSelector() {
                       {profile.repoPaths.length} repos · {profile.rootPath}
                     </p>
                   </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setConfirmDeleteId(profile.id)
-                    }}
-                    className="ml-2 hidden rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:block"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
+                  <div className="ml-2 hidden items-center gap-0.5 group-hover:flex">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        openEditProfile(profile.id)
+                        setOpen(false)
+                      }}
+                      className="rounded p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setConfirmDeleteId(profile.id)
+                      }}
+                      className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
                 </>
               )}
             </div>

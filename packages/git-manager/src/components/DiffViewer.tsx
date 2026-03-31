@@ -100,7 +100,7 @@ export function DiffViewer() {
   const typeBadgeVariant = diffFile.type === 'staged' ? 'success' as const : diffFile.type === 'modified' ? 'warning' as const : 'secondary' as const
 
   return (
-    <div className="flex h-full flex-col border-l border-border">
+    <div className="flex h-full flex-col border-l border-border min-w-0 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <div className="flex items-center gap-2 min-w-0">
@@ -146,54 +146,58 @@ export function DiffViewer() {
           </div>
         )}
 
-        {!diffLoading && hunks.map((hunk, hi) => (
-          <div key={hi}>
-            {/* Hunk header */}
-            <div className="sticky top-0 z-10 bg-info/10 px-3 py-1 text-[10px] font-mono text-info border-y border-info/20">
-              {hunk.header}
-            </div>
-
-            {/* Lines */}
-            <div className="font-mono text-[11px] leading-[18px]">
-              {hunk.lines.map((line, li) => (
-                <div
-                  key={li}
-                  className={cn(
-                    'flex',
-                    line.type === 'add' && 'bg-green-500/10',
-                    line.type === 'del' && 'bg-red-500/10'
-                  )}
-                >
-                  {/* Line numbers */}
-                  <span className="w-10 shrink-0 select-none text-right pr-1 text-muted-foreground/50 text-[10px]">
-                    {line.oldNum ?? ''}
-                  </span>
-                  <span className="w-10 shrink-0 select-none text-right pr-1 text-muted-foreground/50 text-[10px]">
-                    {line.newNum ?? ''}
-                  </span>
-
-                  {/* Indicator */}
-                  <span className={cn(
-                    'w-4 shrink-0 select-none text-center',
-                    line.type === 'add' && 'text-green-500',
-                    line.type === 'del' && 'text-red-400'
-                  )}>
-                    {line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' '}
-                  </span>
-
-                  {/* Content */}
-                  <span className={cn(
-                    'flex-1 whitespace-pre pr-3',
-                    line.type === 'add' && 'text-green-400',
-                    line.type === 'del' && 'text-red-400'
-                  )}>
-                    {line.content || '\u00A0'}
-                  </span>
+        {!diffLoading && hunks.length > 0 && (
+          <div className="min-w-max">
+            {hunks.map((hunk, hi) => (
+              <div key={hi}>
+                {/* Hunk header */}
+                <div className="sticky top-0 z-10 bg-info/10 px-3 py-1 text-[10px] font-mono text-info border-y border-info/20">
+                  {hunk.header}
                 </div>
-              ))}
-            </div>
+
+                {/* Lines */}
+                <div className="font-mono text-[11px] leading-[18px]">
+                  {hunk.lines.map((line, li) => (
+                    <div
+                      key={li}
+                      className={cn(
+                        'flex',
+                        line.type === 'add' && 'bg-green-500/10',
+                        line.type === 'del' && 'bg-red-500/10'
+                      )}
+                    >
+                      {/* Line numbers */}
+                      <span className="w-10 shrink-0 select-none text-right pr-1 text-muted-foreground/50 text-[10px]">
+                        {line.oldNum ?? ''}
+                      </span>
+                      <span className="w-10 shrink-0 select-none text-right pr-1 text-muted-foreground/50 text-[10px]">
+                        {line.newNum ?? ''}
+                      </span>
+
+                      {/* Indicator */}
+                      <span className={cn(
+                        'w-4 shrink-0 select-none text-center',
+                        line.type === 'add' && 'text-green-500',
+                        line.type === 'del' && 'text-red-400'
+                      )}>
+                        {line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' '}
+                      </span>
+
+                      {/* Content */}
+                      <span className={cn(
+                        'whitespace-pre pr-3',
+                        line.type === 'add' && 'text-green-400',
+                        line.type === 'del' && 'text-red-400'
+                      )}>
+                        {line.content || '\u00A0'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
+        )}
       </div>
     </div>
   )
