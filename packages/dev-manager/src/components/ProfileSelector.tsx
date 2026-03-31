@@ -1,13 +1,22 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
-import { ChevronDown, Plus, Trash2, FolderGit2 } from 'lucide-react'
+import { useEffect, useState, useRef } from 'react'
+import { ChevronDown, Plus, Trash2, Code2, Download, Upload, Pencil } from 'lucide-react'
 import { Button } from '@shared/components/ui/button'
 import { cn } from '@shared/lib/utils'
-import { useClickOutside } from '@shared/hooks/useClickOutside'
-import { useGitManagerStore } from '../store'
+import { useDevManagerStore } from '../store'
 
 export function ProfileSelector() {
-  const { profiles, activeProfileId, setActiveProfile, deleteProfile, setWizardOpen, loadProfiles } =
-    useGitManagerStore()
+  const {
+    profiles,
+    activeProfileId,
+    services,
+    setActiveProfile,
+    deleteProfile,
+    setWizardOpen,
+    openEditProfile,
+    loadProfiles,
+    exportProfile,
+    importProfile
+  } = useDevManagerStore()
   const [open, setOpen] = useState(false)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
@@ -16,11 +25,28 @@ export function ProfileSelector() {
     loadProfiles()
   }, [loadProfiles])
 
-  const closeDropdown = useCallback(() => {
-    setOpen(false)
-    setConfirmDeleteId(null)
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+        setConfirmDeleteId(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
   }, [])
-  useClickOutside(ref, closeDropdown)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false)
+        setConfirmDeleteId(null)
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [open])
 
   const activeProfile = profiles.find((p) => p.id === activeProfileId)
 
@@ -30,7 +56,7 @@ export function ProfileSelector() {
         onClick={() => setOpen(!open)}
         className="flex items-center gap-2 rounded-lg border border-border bg-secondary px-3 py-1.5 text-sm transition-colors hover:bg-muted"
       >
-        <FolderGit2 className="h-3.5 w-3.5 text-primary" />
+        <Code2 className="h-3.5 w-3.5 text-primary" />
         <span className="max-w-[180px] truncate">
           {activeProfile ? activeProfile.name : 'Aucun profil'}
         </span>
@@ -54,7 +80,12 @@ export function ProfileSelector() {
             >
               {confirmDeleteId === profile.id ? (
                 <div className="flex w-full items-center justify-between">
-                  <span className="text-xs text-destructive">Supprimer ?</span>
+                  <div>
+                    <span className="text-xs text-destructive">Supprimer ?</span>
+                    {profile.id === activeProfileId && services.some((s) => s.status !== 'stopped') && (
+                      <p className="text-[9px] text-destructive/80">Des services sont en cours</p>
+                    )}
+                  </div>
                   <div className="flex items-center gap-1">
                     <Button
                       variant="destructive"
@@ -92,23 +123,35 @@ export function ProfileSelector() {
                   >
                     <p className="truncate text-sm font-medium">{profile.name}</p>
                     <p className="truncate text-[10px] text-muted-foreground">
-                      {profile.repoPaths.length} repos · {profile.rootPath}
+                      {profile.services.length} services · {profile.rootPath}
                     </p>
                   </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setConfirmDeleteId(profile.id)
-                    }}
-                    className="ml-2 hidden rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:block"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
+                  <div className="ml-2 hidden items-center gap-0.5 group-hover:flex">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        openEditProfile(profile.id)
+                        setOpen(false)
+                      }}
+                      className="rounded p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setConfirmDeleteId(profile.id)
+                      }}
+                      className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
                 </>
               )}
             </div>
           ))}
-          <div className="mt-1 border-t border-border pt-1">
+          <div className="mt-1 border-t border-border pt-1 space-y-0.5">
             <Button
               variant="ghost"
               size="sm"
@@ -120,6 +163,31 @@ export function ProfileSelector() {
             >
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               Nouveau profil
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start"
+              onClick={() => {
+                exportProfile()
+                setOpen(false)
+              }}
+              disabled={!activeProfileId}
+            >
+              <Download className="mr-1.5 h-3.5 w-3.5" />
+              Exporter le profil
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start"
+              onClick={() => {
+                importProfile()
+                setOpen(false)
+              }}
+            >
+              <Upload className="mr-1.5 h-3.5 w-3.5" />
+              Importer un profil
             </Button>
           </div>
         </div>

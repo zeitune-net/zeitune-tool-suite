@@ -67,6 +67,8 @@ interface GitManagerStore {
   unstageFiles: (repoPath: string, files: string[]) => Promise<void>
   stageAllFiles: (repoPath: string) => Promise<void>
   discardFiles: (repoPath: string, files: string[]) => Promise<void>
+  discardUntrackedFiles: (repoPath: string, files: string[]) => Promise<void>
+  discardStagedFiles: (repoPath: string, files: string[]) => Promise<void>
   commitChanges: (repoPath: string, message: string) => Promise<void>
   pullRepo: (repoPath: string, branch?: string) => Promise<void>
   pushRepo: (repoPath: string, branch?: string, setUpstream?: boolean) => Promise<void>
@@ -136,11 +138,15 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
   activeProfileId: null,
 
   loadProfiles: async () => {
-    const profiles = await gitIpc.listProfiles()
-    set({ profiles })
-    // Auto-select first profile if none active
-    if (!get().activeProfileId && profiles.length > 0) {
-      get().setActiveProfile(profiles[0].id)
+    try {
+      const profiles = await gitIpc.listProfiles()
+      set({ profiles })
+      // Auto-select first profile if none active
+      if (!get().activeProfileId && profiles.length > 0) {
+        get().setActiveProfile(profiles[0].id)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur chargement des profils')
     }
   },
 
@@ -150,34 +156,46 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
   },
 
   createProfile: async (name, rootPath, repoPaths) => {
-    const profile: Profile = {
-      id: generateId(),
-      name,
-      rootPath,
-      repoPaths,
-      createdAt: Date.now()
+    try {
+      const profile: Profile = {
+        id: generateId(),
+        name,
+        rootPath,
+        repoPaths,
+        createdAt: Date.now()
+      }
+      const profiles = await gitIpc.saveProfile(profile)
+      set({ profiles, wizardOpen: false })
+      get().setActiveProfile(profile.id)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur création du profil')
     }
-    const profiles = await gitIpc.saveProfile(profile)
-    set({ profiles, wizardOpen: false })
-    get().setActiveProfile(profile.id)
   },
 
   deleteProfile: async (id) => {
-    const profiles = await gitIpc.deleteProfile(id)
-    set({ profiles })
-    if (get().activeProfileId === id) {
-      const next = profiles.length > 0 ? profiles[0].id : null
-      get().setActiveProfile(next)
+    try {
+      const profiles = await gitIpc.deleteProfile(id)
+      set({ profiles })
+      if (get().activeProfileId === id) {
+        const next = profiles.length > 0 ? profiles[0].id : null
+        get().setActiveProfile(next)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur suppression du profil')
     }
   },
 
   updateProfileRepos: async (profileId, repoPaths) => {
-    const profile = get().profiles.find((p) => p.id === profileId)
-    if (!profile) return
-    const updated = { ...profile, repoPaths }
-    const profiles = await gitIpc.saveProfile(updated)
-    set({ profiles })
-    if (get().activeProfileId === profileId) get().loadRepositories()
+    try {
+      const profile = get().profiles.find((p) => p.id === profileId)
+      if (!profile) return
+      const updated = { ...profile, repoPaths }
+      const profiles = await gitIpc.saveProfile(updated)
+      set({ profiles })
+      if (get().activeProfileId === profileId) get().loadRepositories()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur mise à jour du profil')
+    }
   },
 
   // ── Scanning ─────────────────────────────────────────────────────────────
@@ -227,9 +245,30 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
     }))
     set({ repositories: loadingRepos })
 
-    // Fetch all repo data in parallel
-    const repos = await Promise.all(
+    // Fetch all repo data in parallel (allSettled so one failure doesn't break all)
+    const results = await Promise.allSettled(
       profile.repoPaths.map((p) => fetchRepoData(p, p.split(/[/\\]/).pop() || p))
+    )
+    const repos = results.map((r, i) =>
+      r.status === 'fulfilled'
+        ? r.value
+        : {
+            name: profile.repoPaths[i].split(/[/\\]/).pop() || profile.repoPaths[i],
+            path: profile.repoPaths[i],
+            branch: 'unknown',
+            branches: [],
+            remoteBranches: [],
+            ahead: 0,
+            behind: 0,
+            staged: [],
+            modified: [],
+            untracked: [],
+            conflicts: [],
+            stashes: [],
+            recentLog: [],
+            loading: false,
+            error: r.reason instanceof Error ? r.reason.message : String(r.reason)
+          }
     )
     set({ repositories: repos, selectedRepoPaths: repos.map((r) => r.path) })
   },
@@ -251,7 +290,10 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
   refreshAllRepos: async () => {
     const repos = get().repositories
     set({ repositories: repos.map((r) => ({ ...r, loading: true })) })
-    const updated = await Promise.all(repos.map((r) => fetchRepoData(r.path, r.name)))
+    const results = await Promise.allSettled(repos.map((r) => fetchRepoData(r.path, r.name)))
+    const updated = results.map((r, i) =>
+      r.status === 'fulfilled' ? r.value : { ...repos[i], loading: false, error: 'Erreur de chargement' }
+    )
     set({ repositories: updated })
   },
 
@@ -273,7 +315,11 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
   },
 
   setActiveRepo: (repoPath) => {
-    set({ activeRepoPath: repoPath, viewMode: repoPath ? 'detail' : 'dashboard' })
+    set({
+      activeRepoPath: repoPath,
+      viewMode: repoPath ? 'detail' : 'dashboard',
+      detailTab: 'changes'
+    })
   },
 
   // ── View ─────────────────────────────────────────────────────────────────
@@ -295,6 +341,7 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
   clearBatchResults: () => set({ batchResults: [] }),
 
   batchFetch: async () => {
+    if (get().batchLoading) return
     const selected = get().selectedRepoPaths
     const repos = get().repositories.filter((r) => selected.includes(r.path))
     set({ batchLoading: true, batchResults: [] })
@@ -321,6 +368,7 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
   },
 
   batchPull: async (branch?) => {
+    if (get().batchLoading) return
     const selected = get().selectedRepoPaths
     const repos = get().repositories.filter((r) => selected.includes(r.path))
     set({ batchLoading: true, batchResults: [] })
@@ -354,6 +402,7 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
   },
 
   batchPush: async (branch?) => {
+    if (get().batchLoading) return
     const selected = get().selectedRepoPaths
     const repos = get().repositories.filter((r) => selected.includes(r.path))
     set({ batchLoading: true, batchResults: [] })
@@ -381,6 +430,7 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
   },
 
   batchCheckout: async (branch) => {
+    if (get().batchLoading) return
     const selected = get().selectedRepoPaths
     const repos = get().repositories.filter((r) => selected.includes(r.path))
     set({ batchLoading: true, batchResults: [] })
@@ -413,6 +463,7 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
   },
 
   batchCommit: async (message) => {
+    if (get().batchLoading) return
     const selected = get().selectedRepoPaths
     const repos = get().repositories.filter(
       (r) => selected.includes(r.path) && (r.staged.length > 0 || r.modified.length > 0 || r.untracked.length > 0)
@@ -457,6 +508,7 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
   operationLoading: null,
 
   checkoutBranch: async (repoPath, branch) => {
+    if (get().operationLoading === repoPath) return
     set({ operationLoading: repoPath })
     try {
       await gitIpc.checkout(repoPath, branch)
@@ -469,40 +521,87 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
   },
 
   createBranch: async (repoPath, name, startPoint?) => {
+    if (get().operationLoading === repoPath) return
     set({ operationLoading: repoPath })
-    await gitIpc.createBranch(repoPath, name, startPoint)
+    try {
+      await gitIpc.createBranch(repoPath, name, startPoint)
+      toast.success(`Branche ${name} créée`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur création de branche')
+    }
     set({ operationLoading: null })
     get().refreshRepo(repoPath)
   },
 
   deleteBranch: async (repoPath, branch, force?) => {
+    if (get().operationLoading === repoPath) return
     set({ operationLoading: repoPath })
-    await gitIpc.deleteBranch(repoPath, branch, force || false)
+    try {
+      await gitIpc.deleteBranch(repoPath, branch, force || false)
+      toast.success(`Branche ${branch} supprimée`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur suppression de branche')
+    }
     set({ operationLoading: null })
     get().refreshRepo(repoPath)
   },
 
   stageFiles: async (repoPath, files) => {
-    await gitIpc.stage(repoPath, files)
+    try {
+      await gitIpc.stage(repoPath, files)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur stage')
+    }
     get().refreshRepo(repoPath)
   },
 
   unstageFiles: async (repoPath, files) => {
-    await gitIpc.unstage(repoPath, files)
+    try {
+      await gitIpc.unstage(repoPath, files)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur unstage')
+    }
     get().refreshRepo(repoPath)
   },
 
   stageAllFiles: async (repoPath) => {
-    await gitIpc.stageAll(repoPath)
+    try {
+      await gitIpc.stageAll(repoPath)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur stage all')
+    }
     get().refreshRepo(repoPath)
   },
 
   discardFiles: async (repoPath, files) => {
-    await gitIpc.discardChanges(repoPath, files)
+    try {
+      await gitIpc.discardChanges(repoPath, files)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur discard')
+    }
+    get().refreshRepo(repoPath)
+  },
+
+  discardUntrackedFiles: async (repoPath, files) => {
+    try {
+      await gitIpc.discardChanges(repoPath, files, true)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur suppression fichier')
+    }
+    get().refreshRepo(repoPath)
+  },
+
+  discardStagedFiles: async (repoPath, files) => {
+    try {
+      await gitIpc.discardStagedChanges(repoPath, files)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur rollback')
+    }
     get().refreshRepo(repoPath)
   },
 
   commitChanges: async (repoPath, message) => {
+    if (get().operationLoading === repoPath) return
     set({ operationLoading: repoPath })
     try {
       await gitIpc.commit(repoPath, message)
@@ -516,6 +615,7 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
   },
 
   pullRepo: async (repoPath, branch?) => {
+    if (get().operationLoading === repoPath) return
     set({ operationLoading: repoPath })
     try {
       const res = await gitIpc.pull(repoPath, branch)
@@ -530,6 +630,7 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
   },
 
   pushRepo: async (repoPath, branch?, setUpstream?) => {
+    if (get().operationLoading === repoPath) return
     set({ operationLoading: repoPath })
     try {
       const res = await gitIpc.push(repoPath, branch, setUpstream)
@@ -544,41 +645,77 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
   },
 
   fetchRepo: async (repoPath) => {
+    if (get().operationLoading === repoPath) return
     set({ operationLoading: repoPath })
-    await gitIpc.fetch(repoPath)
+    try {
+      await gitIpc.fetch(repoPath)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur fetch')
+    }
     set({ operationLoading: null })
     get().refreshRepo(repoPath)
   },
 
   mergeBranch: async (repoPath, branch) => {
+    if (get().operationLoading === repoPath) return
     set({ operationLoading: repoPath })
-    await gitIpc.merge(repoPath, branch)
+    try {
+      const res = await gitIpc.merge(repoPath, branch)
+      if (res.success) toast.success(`Merge ${branch} réussi`)
+      else toast.warning(`Merge ${branch} : conflits`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur merge')
+    }
     set({ operationLoading: null })
     get().refreshRepo(repoPath)
   },
 
   abortMerge: async (repoPath) => {
-    await gitIpc.mergeAbort(repoPath)
+    try {
+      await gitIpc.mergeAbort(repoPath)
+      toast.success('Merge annulé')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur abort merge')
+    }
     get().refreshRepo(repoPath)
   },
 
   resolveConflict: async (repoPath, file, strategy) => {
-    await gitIpc.resolveConflict(repoPath, file, strategy)
+    try {
+      await gitIpc.resolveConflict(repoPath, file, strategy)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur résolution du conflit')
+    }
     get().refreshRepo(repoPath)
   },
 
   stashSave: async (repoPath, message?) => {
-    await gitIpc.stashSave(repoPath, message)
+    try {
+      await gitIpc.stashSave(repoPath, message)
+      toast.success('Stash sauvegardé')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur stash save')
+    }
     get().refreshRepo(repoPath)
   },
 
   stashPop: async (repoPath, index?) => {
-    await gitIpc.stashPop(repoPath, index)
+    try {
+      await gitIpc.stashPop(repoPath, index)
+      toast.success('Stash appliqué')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur stash pop')
+    }
     get().refreshRepo(repoPath)
   },
 
   stashDrop: async (repoPath, index) => {
-    await gitIpc.stashDrop(repoPath, index)
+    try {
+      await gitIpc.stashDrop(repoPath, index)
+      toast.success('Stash supprimé')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur stash drop')
+    }
     get().refreshRepo(repoPath)
   }
 }))

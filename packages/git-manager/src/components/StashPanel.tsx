@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { Archive, ArrowUpFromLine, Trash2, Plus, X } from 'lucide-react'
 import { Button } from '@shared/components/ui/button'
+import { useConfirm } from '@shared/components/ui/confirm-dialog'
 import { useGitManagerStore } from '../store'
 import type { Repository } from '../types'
 
 export function StashPanel({ repo }: { repo: Repository }) {
   const { stashSave, stashPop, stashDrop } = useGitManagerStore()
+  const { confirm, dialog: confirmDialog } = useConfirm()
   const [showSave, setShowSave] = useState(false)
   const [stashMessage, setStashMessage] = useState('')
 
@@ -56,9 +58,9 @@ export function StashPanel({ repo }: { repo: Repository }) {
         <p className="py-6 text-center text-xs text-muted-foreground">Aucun stash</p>
       ) : (
         <div className="space-y-1">
-          {repo.stashes.map((stash) => (
+          {repo.stashes.map((stash, i) => (
             <div
-              key={stash.index}
+              key={`${stash.index}-${stash.date}`}
               className="group flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-muted/50"
             >
               <Archive className="h-3.5 w-3.5 text-muted-foreground" />
@@ -69,7 +71,7 @@ export function StashPanel({ repo }: { repo: Repository }) {
                   {'}'}: {stash.message || 'WIP'}
                 </p>
                 <p className="text-[10px] text-muted-foreground">
-                  {new Date(stash.date).toLocaleDateString('fr-FR', {
+                  {new Date(stash.date).toLocaleString('fr-FR', {
                     day: '2-digit',
                     month: 'short',
                     hour: '2-digit',
@@ -86,7 +88,14 @@ export function StashPanel({ repo }: { repo: Repository }) {
                   <ArrowUpFromLine className="h-3 w-3" />
                 </button>
                 <button
-                  onClick={() => stashDrop(repo.path, stash.index)}
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: 'Supprimer ce stash ?',
+                      description: `stash@{${stash.index}} sera définitivement supprimé. Cette action est irréversible.`,
+                      confirmLabel: 'Supprimer'
+                    })
+                    if (ok) stashDrop(repo.path, stash.index)
+                  }}
                   className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   title="Drop (supprimer)"
                 >
@@ -97,6 +106,7 @@ export function StashPanel({ repo }: { repo: Repository }) {
           ))}
         </div>
       )}
+      {confirmDialog}
     </div>
   )
 }

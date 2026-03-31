@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@shared/components/ui/button'
 import { cn } from '@shared/lib/utils'
+import { useClickOutside } from '@shared/hooks/useClickOutside'
 import { useGitManagerStore } from '../store'
 
 function BranchDropdown({
@@ -30,14 +31,8 @@ function BranchDropdown({
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
   const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
+  const closeDropdown = useCallback(() => setOpen(false), [])
+  useClickOutside(ref, closeDropdown)
 
   const filtered = filter
     ? branches.filter((b) => b.toLowerCase().includes(filter.toLowerCase()))
@@ -75,7 +70,7 @@ function BranchDropdown({
           </div>
           <div className="max-h-52 overflow-auto p-1">
             {filtered.length === 0 && (
-              <p className="px-2 py-3 text-center text-[10px] text-muted-foreground">Aucun resultat</p>
+              <p className="px-2 py-3 text-center text-[10px] text-muted-foreground">Aucun résultat</p>
             )}
             {filtered.map((b) => (
               <button
@@ -171,7 +166,7 @@ export function BatchActions() {
             size="sm"
             className="px-1.5"
             onClick={() => setShowPullInput(!showPullInput)}
-            title="Pull une branche specifique"
+            title="Pull une branche spécifique"
           >
             <GitBranch className="h-3 w-3" />
           </Button>
@@ -280,12 +275,12 @@ export function BatchActions() {
       {batchResults.length > 0 && (
         <div className="rounded-xl border border-border p-3">
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-medium text-muted-foreground">Resultats</span>
+            <span className="text-xs font-medium text-muted-foreground">Résultats</span>
             <button onClick={clearBatchResults} className="text-muted-foreground hover:text-foreground">
               <X className="h-3 w-3" />
             </button>
           </div>
-          <div className="space-y-1 max-h-40 overflow-auto">
+          <div className="space-y-1 max-h-64 overflow-auto">
             {batchResults.map((result) => (
               <div
                 key={result.repoPath}

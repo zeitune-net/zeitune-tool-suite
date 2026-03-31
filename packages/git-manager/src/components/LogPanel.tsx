@@ -60,7 +60,7 @@ export function LogPanel({ repo }: { repo: Repository }) {
             </div>
             <p className="mt-0.5 truncate text-xs">{entry.message}</p>
             <p className="text-[10px] text-muted-foreground">
-              {entry.author} · {new Date(entry.date).toLocaleDateString('fr-FR', {
+              {entry.author} · {new Date(entry.date).toLocaleString('fr-FR', {
                 day: '2-digit',
                 month: 'short',
                 hour: '2-digit',

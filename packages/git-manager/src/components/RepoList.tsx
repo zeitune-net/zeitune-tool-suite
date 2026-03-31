@@ -38,18 +38,22 @@ function RepoCard({ repo }: { repo: Repository }) {
           : 'border-border hover:border-border-hi hover:bg-card'
       )}
     >
-      {/* Selection indicator — colored bar */}
+      {/* Selection checkbox */}
       <button
         onClick={(e) => {
           e.stopPropagation()
           toggleRepoSelection(repo.path)
         }}
         className={cn(
-          'flex h-8 w-1 shrink-0 rounded-full transition-colors',
-          isSelected ? 'bg-primary' : 'bg-border hover:bg-muted-foreground/30'
+          'flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-all',
+          isSelected
+            ? 'border-primary bg-primary text-primary-foreground'
+            : 'border-muted-foreground/30 hover:border-primary/50 hover:bg-primary/5'
         )}
-        title={isSelected ? 'Deselectionner' : 'Selectionner'}
-      />
+        title={isSelected ? 'Désélectionner' : 'Sélectionner'}
+      >
+        {isSelected && <Check className="h-3 w-3" />}
+      </button>
 
       {/* Repo info */}
       <button
@@ -57,7 +61,7 @@ function RepoCard({ repo }: { repo: Repository }) {
         onClick={() => setActiveRepo(repo.path)}
       >
         <div className="flex items-center gap-2">
-          <p className="truncate text-xs font-medium">{repo.name}</p>
+          <p className="truncate text-xs font-medium" title={repo.path}>{repo.name}</p>
           {repo.loading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
         </div>
         <div className="mt-0.5 flex items-center gap-1.5">
@@ -212,13 +216,13 @@ export function RepoList() {
         ))}
         {repositories.length > 0 && filteredRepos.length === 0 && (
           <p className="py-6 text-center text-[10px] text-muted-foreground">
-            Aucun resultat pour "{search}"
+            Aucun résultat pour "{search}"
           </p>
         )}
         {repositories.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
             <GitBranch className="mb-2 h-8 w-8 opacity-20" />
-            <p className="text-xs">Selectionnez un profil pour charger les repos</p>
+            <p className="text-xs">Sélectionnez un profil pour charger les repos</p>
           </div>
         )}
       </div>

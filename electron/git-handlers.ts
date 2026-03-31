@@ -1,5 +1,5 @@
 import { ipcMain, dialog, BrowserWindow, shell } from 'electron'
-import { execFile, exec } from 'child_process'
+import { execFile, exec, spawn } from 'child_process'
 import { promisify } from 'util'
 import { readdir, stat, access } from 'fs/promises'
 import { join, basename } from 'path'
@@ -8,11 +8,12 @@ const execFileAsync = promisify(execFile)
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-async function git(cwd: string, args: string[]): Promise<string> {
+async function git(cwd: string, args: string[], timeoutMs = 30_000): Promise<string> {
   const { stdout } = await execFileAsync('git', args, {
     cwd,
     maxBuffer: 10 * 1024 * 1024,
-    windowsHide: true
+    windowsHide: true,
+    timeout: timeoutMs
   })
   return stdout.trim()
 }
@@ -197,7 +198,7 @@ export function registerGitHandlers(): void {
         if (depth < 2) {
           const entries = await readdir(dirPath, { withFileTypes: true })
           const dirs = entries.filter(
-            (e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules'
+            (e) => e.isDirectory() && !e.isSymbolicLink() && !e.name.startsWith('.') && e.name !== 'node_modules'
           )
           await Promise.all(dirs.map((d) => scanDir(join(dirPath, d.name), depth + 1)))
         }
@@ -261,7 +262,7 @@ export function registerGitHandlers(): void {
     const remote = remoteRaw
       ? remoteRaw
           .split('\n')
-          .filter((b) => b && !b.includes('HEAD'))
+          .filter((b) => b && !b.endsWith('/HEAD'))
       : []
 
     return { current, local, remote }
@@ -290,7 +291,7 @@ export function registerGitHandlers(): void {
   // ── Fetch / Pull / Push ──────────────────────────────────────────────────
 
   ipcMain.handle('git:fetch', async (_e, repoPath: string) => {
-    await git(repoPath, ['fetch', '--all', '--prune'])
+    await git(repoPath, ['fetch', '--all', '--prune'], 60_000)
     return true
   })
 
@@ -300,7 +301,7 @@ export function registerGitHandlers(): void {
       if (branch) {
         args.push('origin', branch)
       }
-      const output = await git(repoPath, args)
+      const output = await git(repoPath, args, 60_000)
       return { success: true, conflicts: [], message: output, behind: 0 }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -321,7 +322,7 @@ export function registerGitHandlers(): void {
       if (branch) {
         args.push('origin', branch)
       }
-      const output = await git(repoPath, args)
+      const output = await git(repoPath, args, 60_000)
       return { success: true, message: output }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -346,10 +347,26 @@ export function registerGitHandlers(): void {
     return true
   })
 
-  ipcMain.handle('git:discardChanges', async (_e, repoPath: string, files: string[]) => {
-    await git(repoPath, ['checkout', '--', ...files])
-    return true
-  })
+  ipcMain.handle(
+    'git:discardChanges',
+    async (_e, repoPath: string, files: string[], includeUntracked?: boolean) => {
+      if (includeUntracked) {
+        await git(repoPath, ['clean', '-f', '--', ...files])
+      } else {
+        await git(repoPath, ['checkout', '--', ...files])
+      }
+      return true
+    }
+  )
+
+  ipcMain.handle(
+    'git:discardStagedChanges',
+    async (_e, repoPath: string, files: string[]) => {
+      // Revert both staged and worktree changes back to HEAD
+      await git(repoPath, ['checkout', 'HEAD', '--', ...files])
+      return true
+    }
+  )
 
   // ── Commit ───────────────────────────────────────────────────────────────
 
@@ -444,11 +461,48 @@ export function registerGitHandlers(): void {
   // ── Diff ─────────────────────────────────────────────────────────────────
 
   ipcMain.handle('git:diff', async (_e, repoPath: string, file?: string, staged?: boolean) => {
-    const args = ['diff']
+    const args = ['diff', '--no-ext-diff', '--no-color']
     if (staged) args.push('--cached')
     if (file) args.push('--', file)
-    const diff = await gitSafe(repoPath, args)
+    let diff = await gitSafe(repoPath, args)
+
+    // Fallback for staged files: if --cached returns empty, try diff-index
+    if (!diff && staged && file) {
+      diff = await gitSafe(repoPath, ['diff-index', '-p', '--cached', '--no-ext-diff', '--no-color', 'HEAD', '--', file])
+    }
+
+    // Final fallback: show staged content as new file diff
+    if (!diff && staged && file) {
+      try {
+        const content = await git(repoPath, ['show', `:${file}`])
+        if (content) {
+          const lines = content.split('\n').map((l: string) => '+' + l).join('\n')
+          diff = `diff --git a/${file} b/${file}\n--- /dev/null\n+++ b/${file}\n@@ -0,0 +1,${content.split('\n').length} @@\n${lines}`
+        }
+      } catch {
+        // no staged content available
+      }
+    }
+
     return { diff }
+  })
+
+  // ── File content (for untracked files) ────────────────────────────────────
+
+  ipcMain.handle('git:fileContent', async (_e, repoPath: string, filePath: string) => {
+    const { resolve } = await import('path')
+    const fullPath = join(repoPath, filePath)
+    // Security: ensure the file is within the repo
+    const resolvedFull = resolve(fullPath)
+    const resolvedRepo = resolve(repoPath)
+    if (!resolvedFull.startsWith(resolvedRepo)) {
+      throw new Error('Path traversal detected')
+    }
+    try {
+      return await readFile(fullPath, 'utf-8')
+    } catch {
+      return null
+    }
   })
 
   // ── Shell actions ─────────────────────────────────────────────────────────
@@ -456,11 +510,11 @@ export function registerGitHandlers(): void {
   ipcMain.handle('shell:openInTerminal', async (_e, dirPath: string) => {
     const platform = process.platform
     if (platform === 'win32') {
-      exec(`start cmd /K "cd /d ${dirPath}"`)
+      spawn('cmd.exe', ['/K', `cd /d "${dirPath}"`], { detached: true, stdio: 'ignore' }).unref()
     } else if (platform === 'darwin') {
-      exec(`open -a Terminal "${dirPath}"`)
+      execFile('open', ['-a', 'Terminal', dirPath])
     } else {
-      exec(`x-terminal-emulator --working-directory="${dirPath}" || xterm -e "cd '${dirPath}' && bash"`)
+      spawn('x-terminal-emulator', [`--working-directory=${dirPath}`], { detached: true, stdio: 'ignore' }).unref()
     }
     return true
   })

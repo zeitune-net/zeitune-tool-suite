@@ -2,7 +2,11 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 const SEND_CHANNELS = ['window:minimize', 'window:maximize', 'window:close']
 
-const ON_CHANNELS = ['window:maximized-changed']
+const ON_CHANNELS = [
+  'window:maximized-changed',
+  'dev:service:log',
+  'dev:service:status'
+]
 
 const INVOKE_CHANNELS = [
   'window:isMaximized',
@@ -26,6 +30,7 @@ const INVOKE_CHANNELS = [
   'git:unstage',
   'git:stageAll',
   'git:discardChanges',
+  'git:discardStagedChanges',
   'git:commit',
   'git:merge',
   'git:mergeAbort',
@@ -36,9 +41,29 @@ const INVOKE_CHANNELS = [
   'git:stashDrop',
   'git:log',
   'git:diff',
+  'git:fileContent',
   // Shell actions
   'shell:openInTerminal',
-  'shell:openInExplorer'
+  'shell:openInExplorer',
+  // Dev Manager
+  'dev:profile:list',
+  'dev:profile:save',
+  'dev:profile:delete',
+  'dev:profile:export',
+  'dev:profile:import',
+  'dev:scan',
+  'dev:service:start',
+  'dev:service:stop',
+  'dev:service:restart',
+  'dev:service:build',
+  'dev:service:startBatch',
+  'dev:service:stopBatch',
+  'dev:service:restartBatch',
+  'dev:port:check',
+  'dev:port:checkBatch',
+  'dev:docker:health',
+  'dev:service:probe',
+  'dev:process:list'
 ]
 
 contextBridge.exposeInMainWorld('electron', {

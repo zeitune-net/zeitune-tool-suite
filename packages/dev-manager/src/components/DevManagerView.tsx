@@ -1,59 +1,42 @@
-import { Code2, Play, Square, Circle } from 'lucide-react'
+import { useEffect } from 'react'
+import { Code2, RefreshCw, Terminal, Check, AlertCircle } from 'lucide-react'
 import { Button } from '@shared/components/ui/button'
 import { cn } from '@shared/lib/utils'
+import { useDevManagerStore } from '../store'
+import { ProfileSelector } from './ProfileSelector'
+import { ProfileWizard } from './ProfileWizard'
+import { GroupActions } from './GroupActions'
+import { StatsBar } from './StatsBar'
+import { ServiceList } from './ServiceList'
+import { ServiceDetail } from './ServiceDetail'
+import { LogPanel } from './LogPanel'
 
-type ServiceStatus = 'running' | 'stopped' | 'building' | 'error'
-
-interface MockService {
-  name: string
-  port: number
-  status: ServiceStatus
-  description: string
-  type: 'service' | 'infrastructure'
-}
-
-const mockServices: MockService[] = [
-  { name: 'olive-gateway', port: 8080, status: 'running', description: 'Spring Cloud Gateway', type: 'service' },
-  { name: 'olive-auth', port: 8081, status: 'running', description: 'Auth + JWT', type: 'service' },
-  { name: 'olive-pricing', port: 8083, status: 'building', description: 'Pricing Engine', type: 'service' },
-  { name: 'olive-admin', port: 8084, status: 'running', description: 'Administration', type: 'service' },
-  { name: 'olive-exploitation', port: 8085, status: 'stopped', description: 'Exploitation', type: 'service' },
-  { name: 'olive-pdf-builder', port: 8087, status: 'error', description: 'PDF Generation', type: 'service' }
-]
-
-const mockInfra: MockService[] = [
-  { name: 'PostgreSQL', port: 5432, status: 'running', description: 'Docker', type: 'infrastructure' },
-  { name: 'Consul', port: 8500, status: 'running', description: 'Service Discovery', type: 'infrastructure' },
-  { name: 'Redis', port: 6379, status: 'running', description: 'Docker', type: 'infrastructure' }
-]
-
-const statusColor: Record<ServiceStatus, string> = {
-  running: 'bg-green-500',
-  stopped: 'bg-gray-500',
-  building: 'bg-yellow-500 animate-pulse',
-  error: 'bg-red-500'
-}
-
-const statusLabel: Record<ServiceStatus, string> = {
-  running: 'Running',
-  stopped: 'Stopped',
-  building: 'Building...',
-  error: 'Error'
-}
-
-function StatCard({ label, value, color }: { label: string; value: number; color?: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <p className="text-xs font-medium uppercase text-muted-foreground">{label}</p>
-      <p className={cn('mt-1 text-2xl font-semibold', color)}>{value}</p>
-    </div>
-  )
-}
+const PROBE_INTERVAL = 15_000 // 15 seconds
 
 export function DevManagerView() {
-  const running = mockServices.filter((s) => s.status === 'running').length
-  const building = mockServices.filter((s) => s.status === 'building').length
-  const errors = mockServices.filter((s) => s.status === 'error').length
+  const {
+    activeProfileId,
+    viewMode,
+    services,
+    initIpcListeners,
+    logPanelOpen,
+    setLogPanelOpen,
+    probeServices
+  } = useDevManagerStore()
+
+  // Initialize IPC listeners once
+  useEffect(() => {
+    initIpcListeners()
+  }, [initIpcListeners])
+
+  // Periodic probe to detect externally running services
+  useEffect(() => {
+    if (!activeProfileId) return
+    const interval = setInterval(probeServices, PROBE_INTERVAL)
+    return () => clearInterval(interval)
+  }, [activeProfileId, probeServices])
+
+  const hasLogs = services.some((s) => s.logs.length > 0)
 
   return (
     <div className="flex h-full flex-col">
@@ -65,82 +48,176 @@ export function DevManagerView() {
           </div>
           <div>
             <h1 className="text-xl font-semibold">Dev Manager</h1>
-            <p className="text-sm text-muted-foreground">Olive Insurance · Spring Boot Microservices</p>
+            <p className="text-sm text-muted-foreground">
+              {services.length > 0
+                ? `${services.length} services`
+                : 'Gerez vos microservices'}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
-            <Square className="mr-1.5 h-3 w-3" />
-            Stop All
-          </Button>
-          <Button size="sm">
-            <Play className="mr-1.5 h-3.5 w-3.5" />
-            Start All
-          </Button>
+          {activeProfileId && <GroupActions />}
+          <ProfileSelector />
+          {activeProfileId && hasLogs && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setLogPanelOpen(!logPanelOpen)}
+            >
+              <Terminal className="mr-1.5 h-3.5 w-3.5" />
+              Logs
+            </Button>
+          )}
         </div>
       </div>
 
       {/* Content */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Service list */}
-        <div className="w-64 shrink-0 border-r border-border overflow-auto p-3">
-          <p className="mb-2 px-2 text-xs font-medium uppercase text-muted-foreground">Services</p>
-          <div className="space-y-1">
-            {mockServices.map((svc) => (
-              <div
-                key={svc.name}
-                className="flex items-center justify-between rounded-lg px-3 py-2.5 hover:bg-accent transition-colors cursor-pointer"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <Circle className={cn('h-2.5 w-2.5 shrink-0 fill-current', statusColor[svc.status].replace('bg-', 'text-').replace(' animate-pulse', ''))} />
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{svc.name}</p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {svc.status === 'running' || svc.status === 'error' ? statusLabel[svc.status] : svc.description}
-                    </p>
-                  </div>
-                </div>
-                <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">:{svc.port}</span>
+      {!activeProfileId ? (
+        <EmptyState />
+      ) : (
+        <div className="flex flex-1 overflow-hidden">
+          {viewMode === 'detail' ? (
+            <ServiceDetail />
+          ) : (
+            <>
+              {/* Service list sidebar */}
+              <div className="w-64 shrink-0 border-r border-border overflow-hidden p-3">
+                <ServiceList />
               </div>
-            ))}
-          </div>
 
-          <p className="mb-2 mt-4 px-2 text-xs font-medium uppercase text-muted-foreground">Infrastructure</p>
-          <div className="space-y-1">
-            {mockInfra.map((inf) => (
-              <div
-                key={inf.name}
-                className="flex items-center justify-between rounded-lg px-3 py-2.5 hover:bg-accent transition-colors cursor-pointer"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <Circle className="h-2.5 w-2.5 shrink-0 fill-current text-green-500" />
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{inf.name}</p>
-                    <p className="truncate text-xs text-muted-foreground">{inf.description}</p>
-                  </div>
+              {/* Main area */}
+              <div className="flex flex-1 flex-col overflow-hidden">
+                <div className="flex-1 overflow-auto p-4">
+                  <StatsBar />
+                  <DashboardGrid />
                 </div>
-                <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">:{inf.port}</span>
+
+                {/* Log panel */}
+                <LogPanel />
               </div>
-            ))}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Wizard modal */}
+      <ProfileWizard />
+    </div>
+  )
+}
+
+function EmptyState() {
+  const { setWizardOpen } = useDevManagerStore()
+
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center text-muted-foreground">
+      <Code2 className="mb-4 h-16 w-16 opacity-10" />
+      <h2 className="mb-1 text-lg font-semibold text-foreground">Bienvenue dans Dev Manager</h2>
+      <p className="mb-4 text-sm">Créez un profil pour commencer à gérer vos services</p>
+      <Button onClick={() => setWizardOpen(true)}>Créer un profil</Button>
+    </div>
+  )
+}
+
+function DashboardGrid() {
+  const {
+    services,
+    setActiveService,
+    selectedServiceIds,
+    toggleServiceSelection,
+    portStatuses
+  } = useDevManagerStore()
+
+  if (services.length === 0) return null
+
+  // Group by group tag
+  const groups: Record<string, typeof services> = {}
+  for (const svc of services) {
+    const group = svc.config.group || 'Autres'
+    if (!groups[group]) groups[group] = []
+    groups[group].push(svc)
+  }
+
+  const statusColor: Record<string, string> = {
+    running: 'border-green-500/30 bg-green-500/5',
+    starting: 'border-yellow-500/20 bg-yellow-500/5',
+    error: 'border-red-500/30 bg-red-500/5',
+    stopped: 'border-border',
+    stopping: 'border-yellow-500/20 bg-yellow-500/5',
+    external: 'border-blue-400/30 bg-blue-400/5'
+  }
+
+  const statusDot: Record<string, string> = {
+    running: 'bg-green-500',
+    starting: 'bg-yellow-500 animate-pulse',
+    error: 'bg-red-500',
+    stopped: 'bg-gray-500',
+    stopping: 'bg-yellow-500 animate-pulse',
+    external: 'bg-blue-400'
+  }
+
+  const handleCheckbox = (e: React.MouseEvent, serviceId: string) => {
+    e.stopPropagation()
+    toggleServiceSelection(serviceId)
+  }
+
+  return (
+    <div className="mt-4 space-y-4">
+      {Object.entries(groups).sort().map(([group, groupServices]) => (
+        <div key={group}>
+          <h3 className="mb-2 text-xs font-medium text-muted-foreground">{group}</h3>
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
+            {groupServices.map((svc) => {
+              const isSelected = selectedServiceIds.has(svc.id)
+              const portAvailable = portStatuses.get(svc.id)
+              const portOccupied = portAvailable === false && svc.status === 'stopped'
+
+              return (
+                <button
+                  key={svc.id}
+                  onClick={() => setActiveService(svc.id)}
+                  className={cn(
+                    'group relative flex items-center gap-2.5 rounded-xl border p-3 text-left transition-all hover:bg-muted/50',
+                    isSelected ? 'ring-1 ring-primary/50' : '',
+                    statusColor[svc.status]
+                  )}
+                >
+                  {/* Checkbox */}
+                  <div
+                    onClick={(e) => handleCheckbox(e, svc.id)}
+                    className={cn(
+                      'flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors',
+                      isSelected
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-muted-foreground/30 opacity-0 group-hover:opacity-100'
+                    )}
+                  >
+                    {isSelected && <Check className="h-3 w-3" />}
+                  </div>
+                  <div className={cn('h-2.5 w-2.5 shrink-0 rounded-full', statusDot[svc.status])} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-medium">{svc.config.name}</p>
+                    <div className="flex items-center gap-1">
+                      <p className="truncate text-[10px] text-muted-foreground">
+                        {svc.config.port ? `:${svc.config.port}` : svc.config.type}
+                      </p>
+                      {svc.status === 'external' && (
+                        <span className="text-[9px] text-blue-400 font-medium">externe</span>
+                      )}
+                      {portOccupied && svc.status !== 'external' && (
+                        <span className="flex items-center gap-0.5 text-[9px] text-red-400" title={`Port ${svc.config.port} occupé`}>
+                          <AlertCircle className="h-2.5 w-2.5" />
+                          occupé
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
           </div>
         </div>
-
-        {/* Stats + Logs area */}
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="grid grid-cols-4 gap-3 border-b border-border p-4">
-            <StatCard label="Running" value={running} color="text-green-500" />
-            <StatCard label="Building" value={building} color="text-yellow-500" />
-            <StatCard label="Errors" value={errors} color="text-red-500" />
-            <StatCard label="Containers" value={mockInfra.length} color="text-blue-500" />
-          </div>
-
-          {/* Log area placeholder */}
-          <div className="flex-1 overflow-auto bg-card/50 p-4 font-mono text-xs">
-            <p className="text-muted-foreground">Les logs des services apparaitront ici...</p>
-            <p className="mt-2 text-muted-foreground/50">Demarrez un service pour voir sa sortie en temps reel</p>
-          </div>
-        </div>
-      </div>
+      ))}
     </div>
   )
 }

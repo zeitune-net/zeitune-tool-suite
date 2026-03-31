@@ -61,8 +61,10 @@ export const stage = (repoPath: string, files: string[]) =>
 export const unstage = (repoPath: string, files: string[]) =>
   invoke<boolean>('git:unstage', repoPath, files)
 export const stageAll = (repoPath: string) => invoke<boolean>('git:stageAll', repoPath)
-export const discardChanges = (repoPath: string, files: string[]) =>
-  invoke<boolean>('git:discardChanges', repoPath, files)
+export const discardChanges = (repoPath: string, files: string[], includeUntracked?: boolean) =>
+  invoke<boolean>('git:discardChanges', repoPath, files, includeUntracked)
+export const discardStagedChanges = (repoPath: string, files: string[]) =>
+  invoke<boolean>('git:discardStagedChanges', repoPath, files)
 
 // ── Commit ─────────────────────────────────────────────────────────────────
 
@@ -96,6 +98,9 @@ export const getLog = (repoPath: string, count?: number) =>
 
 export const getDiff = (repoPath: string, file?: string, staged?: boolean) =>
   invoke<DiffResult>('git:diff', repoPath, file, staged)
+
+export const getFileContent = (repoPath: string, filePath: string) =>
+  invoke<string | null>('git:fileContent', repoPath, filePath)
 
 // ── Shell actions ─────────────────────────────────────────────────────────
 

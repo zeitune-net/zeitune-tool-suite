@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { X, FolderOpen, Search, Check, Loader2 } from 'lucide-react'
 import { Button } from '@shared/components/ui/button'
 import { Badge } from '@shared/components/ui/badge'
@@ -18,19 +18,30 @@ export function ProfileWizard() {
   const [rootPath, setRootPath] = useState('')
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
 
+  // Pre-select all repos once scan results arrive
+  useEffect(() => {
+    if (step === 'select' && scanResults.length > 0) {
+      setSelectedPaths(new Set(scanResults.map((r: ScanResult) => r.path)))
+    }
+  }, [step, scanResults])
+
   if (!wizardOpen) return null
 
   const handleBrowse = async () => {
     const dir = await openDirectoryDialog()
-    if (dir) setRootPath(dir)
+    if (dir) {
+      setRootPath(dir)
+      if (!name.trim()) {
+        const folderName = dir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || ''
+        setName(folderName)
+      }
+    }
   }
 
   const handleScan = async () => {
     if (!rootPath) return
     await scanDirectory(rootPath)
     setStep('select')
-    // Pre-select all found repos
-    setSelectedPaths(new Set(scanResults.map((r: ScanResult) => r.path)))
   }
 
   const toggleRepo = (path: string) => {

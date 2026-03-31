@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import {
   GitBranch,
   Plus,
@@ -13,7 +13,9 @@ import {
 } from 'lucide-react'
 import { Button } from '@shared/components/ui/button'
 import { Badge } from '@shared/components/ui/badge'
+import { useConfirm } from '@shared/components/ui/confirm-dialog'
 import { cn } from '@shared/lib/utils'
+import { useClickOutside } from '@shared/hooks/useClickOutside'
 import { useGitManagerStore } from '../store'
 import type { Repository } from '../types'
 
@@ -33,16 +35,8 @@ function MergeSection({
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
   const dropdownRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
+  const closeDropdown = useCallback(() => setOpen(false), [])
+  useClickOutside(dropdownRef, closeDropdown)
 
   const localBranches = repo.branches.filter((b) => b !== repo.branch)
   const allOptions = [
@@ -86,7 +80,7 @@ function MergeSection({
             </div>
             <div className="max-h-52 overflow-auto p-1">
               {filtered.length === 0 && (
-                <p className="px-2 py-3 text-center text-[10px] text-muted-foreground">Aucun resultat</p>
+                <p className="px-2 py-3 text-center text-[10px] text-muted-foreground">Aucun résultat</p>
               )}
               {filtered.map((opt) => (
                 <button
@@ -124,6 +118,7 @@ function MergeSection({
 
 export function BranchPanel({ repo }: { repo: Repository }) {
   const { checkoutBranch, createBranch, deleteBranch, mergeBranch } = useGitManagerStore()
+  const { confirm, dialog: confirmDialog } = useConfirm()
 
   const [showCreate, setShowCreate] = useState(false)
   const [newBranchName, setNewBranchName] = useState('')
@@ -238,7 +233,14 @@ export function BranchPanel({ repo }: { repo: Repository }) {
                       <Check className="h-3 w-3" />
                     </button>
                     <button
-                      onClick={() => deleteBranch(repo.path, branch)}
+                      onClick={async () => {
+                        const ok = await confirm({
+                          title: 'Supprimer cette branche ?',
+                          description: `La branche "${branch}" sera supprimée localement. Cette action est irréversible.`,
+                          confirmLabel: 'Supprimer'
+                        })
+                        if (ok) deleteBranch(repo.path, branch)
+                      }}
                       className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                       title="Supprimer"
                     >
@@ -257,25 +259,41 @@ export function BranchPanel({ repo }: { repo: Repository }) {
         <div>
           <h4 className="mb-1 text-xs font-medium text-muted-foreground">Branches remote</h4>
           <div className="space-y-0.5">
-            {repo.remoteBranches.map((branch) => (
-              <div
-                key={branch}
-                className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/50"
-              >
-                <Globe className="h-3 w-3 text-muted-foreground" />
-                <span className="flex-1 text-xs font-mono text-muted-foreground">{branch}</span>
-                <button
-                  onClick={() => checkoutBranch(repo.path, branch)}
-                  className="hidden rounded p-0.5 text-muted-foreground hover:bg-primary/10 hover:text-primary group-hover:block"
-                  title="Checkout"
+            {repo.remoteBranches.map((branch) => {
+              // Extract local branch name from remote (e.g. "origin/feature" → "feature")
+              const localName = branch.replace(/^[^/]+\//, '')
+              const localExists = repo.branches.includes(localName)
+              return (
+                <div
+                  key={branch}
+                  className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/50"
                 >
-                  <Check className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
+                  <Globe className="h-3 w-3 text-muted-foreground" />
+                  <span className="flex-1 text-xs font-mono text-muted-foreground">{branch}</span>
+                  {localExists ? (
+                    <button
+                      onClick={() => checkoutBranch(repo.path, localName)}
+                      className="hidden rounded p-0.5 text-muted-foreground hover:bg-primary/10 hover:text-primary group-hover:block"
+                      title={`Checkout ${localName}`}
+                    >
+                      <Check className="h-3 w-3" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => createBranch(repo.path, localName, branch)}
+                      className="hidden rounded p-0.5 text-muted-foreground hover:bg-primary/10 hover:text-primary group-hover:block"
+                      title={`Créer et checkout ${localName}`}
+                    >
+                      <Plus className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
+      {confirmDialog}
     </div>
   )
 }

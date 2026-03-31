@@ -121,7 +121,7 @@ export function RepoDetail() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => pushRepo(repo.path, undefined, repo.ahead > 0)}
+              onClick={() => pushRepo(repo.path)}
               disabled={loading}
             >
               <ArrowUpFromLine className="mr-1 h-3 w-3" />
@@ -162,7 +162,13 @@ export function RepoDetail() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto p-4">
+      <div className="relative flex-1 overflow-auto p-4">
+        {loading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        )}
+
         {/* Conflicts always on top */}
         <ConflictPanel repo={repo} />
 
@@ -177,12 +183,6 @@ export function RepoDetail() {
         {detailTab === 'branches' && <BranchPanel repo={repo} />}
         {detailTab === 'log' && <LogPanel repo={repo} />}
         {detailTab === 'stash' && <StashPanel repo={repo} />}
-
-        {loading && (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          </div>
-        )}
       </div>
     </div>
   )

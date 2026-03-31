@@ -1,11 +1,13 @@
 import { AlertTriangle, Check, X, Ban } from 'lucide-react'
 import { Button } from '@shared/components/ui/button'
 import { Badge } from '@shared/components/ui/badge'
+import { useConfirm } from '@shared/components/ui/confirm-dialog'
 import { useGitManagerStore } from '../store'
 import type { Repository } from '../types'
 
 export function ConflictPanel({ repo }: { repo: Repository }) {
   const { resolveConflict, abortMerge } = useGitManagerStore()
+  const { confirm, dialog: confirmDialog } = useConfirm()
 
   if (repo.conflicts.length === 0) return null
 
@@ -21,7 +23,14 @@ export function ConflictPanel({ repo }: { repo: Repository }) {
         <Button
           variant="destructive"
           size="sm"
-          onClick={() => abortMerge(repo.path)}
+          onClick={async () => {
+            const ok = await confirm({
+              title: 'Annuler le merge ?',
+              description: 'Toutes les modifications du merge en cours seront perdues.',
+              confirmLabel: 'Abort merge'
+            })
+            if (ok) abortMerge(repo.path)
+          }}
         >
           <Ban className="mr-1 h-3 w-3" />
           Abort merge
@@ -60,9 +69,10 @@ export function ConflictPanel({ repo }: { repo: Repository }) {
       </div>
 
       <p className="mt-2 text-[10px] text-muted-foreground">
-        Resolvez chaque conflit individuellement ou annulez le merge. Vous pouvez aussi editer
+        Résolvez chaque conflit individuellement ou annulez le merge. Vous pouvez aussi éditer
         manuellement les fichiers puis les stage.
       </p>
+      {confirmDialog}
     </div>
   )
 }

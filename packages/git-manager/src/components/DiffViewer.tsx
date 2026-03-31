@@ -54,24 +54,49 @@ export function DiffViewer({
   repoPath,
   filePath,
   staged,
+  isUntracked,
   onClose
 }: {
   repoPath: string
   filePath: string
   staged: boolean
+  isUntracked?: boolean
   onClose: () => void
 }) {
   const [diff, setDiff] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let cancelled = false
     setLoading(true)
+
+    if (isUntracked) {
+      gitIpc
+        .getFileContent(repoPath, filePath)
+        .then((content) => {
+          if (!cancelled) {
+            // Format as a unified diff-like output for display
+            if (content) {
+              const lines = content.split('\n').map((l) => '+' + l).join('\n')
+              setDiff(`diff --git a/${filePath} b/${filePath}\nnew file\n--- /dev/null\n+++ b/${filePath}\n@@ -0,0 +1,${content.split('\n').length} @@\n${lines}`)
+            } else {
+              setDiff(null)
+            }
+          }
+        })
+        .catch(() => { if (!cancelled) setDiff(null) })
+        .finally(() => { if (!cancelled) setLoading(false) })
+      return
+    }
+
     gitIpc
       .getDiff(repoPath, filePath, staged)
-      .then((res) => setDiff(res.diff))
-      .catch(() => setDiff(null))
-      .finally(() => setLoading(false))
-  }, [repoPath, filePath, staged])
+      .then((res) => { if (!cancelled) setDiff(res.diff) })
+      .catch(() => { if (!cancelled) setDiff(null) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+
+    return () => { cancelled = true }
+  }, [repoPath, filePath, staged, isUntracked])
 
   const lines = diff ? parseDiff(diff) : []
   const fileName = filePath.split(/[/\\]/).pop() || filePath
@@ -100,9 +125,14 @@ export function DiffViewer({
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           </div>
         )}
-        {!loading && lines.length === 0 && (
+        {!loading && isUntracked && lines.length === 0 && (
           <p className="py-6 text-center text-xs text-muted-foreground">
-            Aucune difference
+            Fichier non suivi — contenu vide ou illisible
+          </p>
+        )}
+        {!loading && !isUntracked && lines.length === 0 && (
+          <p className="py-6 text-center text-xs text-muted-foreground">
+            Aucune différence
           </p>
         )}
         {!loading && lines.length > 0 && (
