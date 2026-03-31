@@ -9,13 +9,19 @@ const execFileAsync = promisify(execFile)
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function git(cwd: string, args: string[], timeoutMs = 30_000): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, {
-    cwd,
-    maxBuffer: 10 * 1024 * 1024,
-    windowsHide: true,
-    timeout: timeoutMs
-  })
-  return stdout.trim()
+  try {
+    const { stdout } = await execFileAsync('git', args, {
+      cwd,
+      maxBuffer: 10 * 1024 * 1024,
+      windowsHide: true,
+      timeout: timeoutMs
+    })
+    return stdout.replace(/\r\n/g, '\n').replace(/\n+$/, '')
+  } catch (err: unknown) {
+    const e = err as Error & { stderr?: string; stdout?: string }
+    const detail = e.stderr?.trim() || e.stdout?.trim() || e.message
+    throw new Error(detail)
+  }
 }
 
 async function gitSafe(cwd: string, args: string[]): Promise<string> {
@@ -370,7 +376,11 @@ export function registerGitHandlers(): void {
 
   // ── Commit ───────────────────────────────────────────────────────────────
 
-  ipcMain.handle('git:commit', async (_e, repoPath: string, message: string) => {
+  ipcMain.handle('git:commit', async (_e, repoPath: string, message: string, stagedFiles?: string[]) => {
+    // Re-stage files to ensure index matches UI state
+    if (stagedFiles && stagedFiles.length > 0) {
+      await git(repoPath, ['add', ...stagedFiles])
+    }
     await git(repoPath, ['commit', '-m', message])
     return true
   })

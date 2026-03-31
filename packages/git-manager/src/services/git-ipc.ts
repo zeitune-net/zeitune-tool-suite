@@ -67,8 +67,8 @@ export const discardStagedChanges = (repoPath: string, files: string[]) =>
 
 // ── Commit ─────────────────────────────────────────────────────────────────
 
-export const commit = (repoPath: string, message: string) =>
-  invoke<boolean>('git:commit', repoPath, message)
+export const commit = (repoPath: string, message: string, stagedFiles?: string[]) =>
+  invoke<boolean>('git:commit', repoPath, message, stagedFiles)
 
 // ── Merge ──────────────────────────────────────────────────────────────────
 

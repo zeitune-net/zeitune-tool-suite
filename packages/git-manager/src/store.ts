@@ -552,7 +552,7 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erreur stage')
     }
-    get().refreshRepo(repoPath)
+    await get().refreshRepo(repoPath)
   },
 
   unstageFiles: async (repoPath, files) => {
@@ -561,7 +561,7 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erreur unstage')
     }
-    get().refreshRepo(repoPath)
+    await get().refreshRepo(repoPath)
   },
 
   stageAllFiles: async (repoPath) => {
@@ -570,7 +570,7 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erreur stage all')
     }
-    get().refreshRepo(repoPath)
+    await get().refreshRepo(repoPath)
   },
 
   discardFiles: async (repoPath, files) => {
@@ -579,7 +579,7 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erreur discard')
     }
-    get().refreshRepo(repoPath)
+    await get().refreshRepo(repoPath)
   },
 
   discardUntrackedFiles: async (repoPath, files) => {
@@ -588,7 +588,7 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erreur suppression fichier')
     }
-    get().refreshRepo(repoPath)
+    await get().refreshRepo(repoPath)
   },
 
   discardStagedFiles: async (repoPath, files) => {
@@ -597,21 +597,23 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erreur rollback')
     }
-    get().refreshRepo(repoPath)
+    await get().refreshRepo(repoPath)
   },
 
   commitChanges: async (repoPath, message) => {
     if (get().operationLoading === repoPath) return
     set({ operationLoading: repoPath })
     try {
-      await gitIpc.commit(repoPath, message)
-      const name = get().repositories.find((r) => r.path === repoPath)?.name || ''
+      const repo = get().repositories.find((r) => r.path === repoPath)
+      const stagedFiles = repo?.staged.map((f) => f.path)
+      await gitIpc.commit(repoPath, message, stagedFiles)
+      const name = repo?.name || ''
       toast.success(`Commit sur ${name}`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erreur commit')
     }
     set({ operationLoading: null })
-    get().refreshRepo(repoPath)
+    await get().refreshRepo(repoPath)
   },
 
   pullRepo: async (repoPath, branch?) => {
