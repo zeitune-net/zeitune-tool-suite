@@ -65,6 +65,15 @@ export const discardChanges = (repoPath: string, files: string[], includeUntrack
 export const discardStagedChanges = (repoPath: string, files: string[]) =>
   invoke<boolean>('git:discardStagedChanges', repoPath, files)
 
+// ── Diff ──────────────────────────────────────────────────────────────────
+
+export const getDiff = (repoPath: string, filePath: string, staged: boolean) =>
+  invoke<string>('git:diff', repoPath, filePath, staged)
+export const showFile = (repoPath: string, filePath: string) =>
+  invoke<string>('git:showFile', repoPath, filePath)
+export const fileContent = (repoPath: string, filePath: string) =>
+  invoke<string>('git:fileContent', repoPath, filePath)
+
 // ── Commit ─────────────────────────────────────────────────────────────────
 
 export const commit = (repoPath: string, message: string, stagedFiles?: string[]) =>

@@ -22,6 +22,7 @@ import { LogPanel } from './LogPanel'
 import { StashPanel } from './StashPanel'
 import { CommitPanel } from './CommitPanel'
 import { ConflictPanel } from './ConflictPanel'
+import { DiffViewer } from './DiffViewer'
 import type { DetailTab } from '../types'
 
 const tabs: { id: DetailTab; label: string; icon: React.ReactNode }[] = [
@@ -42,7 +43,8 @@ export function RepoDetail() {
     pullRepo,
     pushRepo,
     fetchRepo,
-    operationLoading
+    operationLoading,
+    diffFile
   } = useGitManagerStore()
 
   const repo = repositories.find((r) => r.path === activeRepoPath)
@@ -162,27 +164,40 @@ export function RepoDetail() {
       </div>
 
       {/* Content */}
-      <div className="relative flex-1 overflow-auto p-4">
-        {loading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      <div className="relative flex flex-1 overflow-hidden">
+        {/* Left: panels */}
+        <div className={cn(
+          'relative overflow-auto p-4',
+          diffFile && detailTab === 'changes' ? 'w-[340px] shrink-0 border-r border-border' : 'flex-1'
+        )}>
+          {loading && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          )}
+
+          {/* Conflicts always on top */}
+          <ConflictPanel repo={repo} />
+
+          {/* Commit panel (visible in changes tab) */}
+          {detailTab === 'changes' && (
+            <div className="mb-3">
+              <CommitPanel repo={repo} />
+            </div>
+          )}
+
+          {detailTab === 'changes' && <ChangesPanel repo={repo} />}
+          {detailTab === 'branches' && <BranchPanel repo={repo} />}
+          {detailTab === 'log' && <LogPanel repo={repo} />}
+          {detailTab === 'stash' && <StashPanel repo={repo} />}
+        </div>
+
+        {/* Right: diff viewer */}
+        {diffFile && detailTab === 'changes' && (
+          <div className="flex-1 overflow-hidden">
+            <DiffViewer />
           </div>
         )}
-
-        {/* Conflicts always on top */}
-        <ConflictPanel repo={repo} />
-
-        {/* Commit panel (visible in changes tab) */}
-        {detailTab === 'changes' && (
-          <div className="mb-3">
-            <CommitPanel repo={repo} />
-          </div>
-        )}
-
-        {detailTab === 'changes' && <ChangesPanel repo={repo} />}
-        {detailTab === 'branches' && <BranchPanel repo={repo} />}
-        {detailTab === 'log' && <LogPanel repo={repo} />}
-        {detailTab === 'stash' && <StashPanel repo={repo} />}
       </div>
     </div>
   )

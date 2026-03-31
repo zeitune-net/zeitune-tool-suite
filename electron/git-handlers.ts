@@ -385,6 +385,32 @@ export function registerGitHandlers(): void {
     return true
   })
 
+  // ── Diff ─────────────────────────────────────────────────────────────────
+
+  ipcMain.handle(
+    'git:diff',
+    async (_e, repoPath: string, filePath: string, staged: boolean) => {
+      if (staged) {
+        return await gitSafe(repoPath, ['diff', '--cached', '--', filePath])
+      }
+      return await gitSafe(repoPath, ['diff', '--', filePath])
+    }
+  )
+
+  ipcMain.handle('git:showFile', async (_e, repoPath: string, filePath: string) => {
+    return await gitSafe(repoPath, ['show', `HEAD:${filePath}`])
+  })
+
+  ipcMain.handle('git:fileContent', async (_e, repoPath: string, filePath: string) => {
+    const { readFile } = await import('fs/promises')
+    const { join } = await import('path')
+    try {
+      return await readFile(join(repoPath, filePath), 'utf-8')
+    } catch {
+      return ''
+    }
+  })
+
   // ── Merge ────────────────────────────────────────────────────────────────
 
   ipcMain.handle('git:merge', async (_e, repoPath: string, branch: string) => {

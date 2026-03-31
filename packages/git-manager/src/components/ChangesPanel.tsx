@@ -41,7 +41,9 @@ function FileItem({
   onUnstage,
   onDiscard,
   onDiscardUntracked,
-  onDiscardStaged
+  onDiscardStaged,
+  onSelect,
+  selected
 }: {
   file: FileChange | string
   type: 'staged' | 'modified' | 'untracked'
@@ -51,6 +53,8 @@ function FileItem({
   onDiscard: (files: string[]) => void
   onDiscardUntracked: (files: string[]) => void
   onDiscardStaged: (files: string[]) => void
+  onSelect: (filePath: string, type: 'staged' | 'modified' | 'untracked') => void
+  selected: boolean
 }) {
   const isString = typeof file === 'string'
   const path = isString ? file : file.path
@@ -58,7 +62,13 @@ function FileItem({
   const fileName = path.split(/[/\\]/).pop() || path
 
   return (
-    <div className="group flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-muted/50">
+    <div
+      className={cn(
+        'group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 hover:bg-muted/50',
+        selected && 'bg-primary/10 ring-1 ring-primary/30'
+      )}
+      onClick={() => onSelect(path, type)}
+    >
       {fileIcon(status)}
       <span
         className="flex-1 truncate text-left text-xs font-mono"
@@ -157,7 +167,7 @@ function Section({
 }
 
 export function ChangesPanel({ repo }: { repo: Repository }) {
-  const { stageFiles, unstageFiles, stageAllFiles, discardFiles, discardUntrackedFiles, discardStagedFiles } = useGitManagerStore()
+  const { stageFiles, unstageFiles, stageAllFiles, discardFiles, discardUntrackedFiles, discardStagedFiles, openDiff, diffFile } = useGitManagerStore()
   const { confirm, dialog: confirmDialog } = useConfirm()
 
   const handleStage = (files: string[]) => stageFiles(repo.path, files)
@@ -188,6 +198,10 @@ export function ChangesPanel({ repo }: { repo: Repository }) {
     })
     if (ok) discardUntrackedFiles(repo.path, files)
   }
+  const handleSelect = (filePath: string, type: 'staged' | 'modified' | 'untracked') => {
+    openDiff(repo.path, filePath, type)
+  }
+  const isSelected = (filePath: string) => diffFile?.repoPath === repo.path && diffFile?.filePath === filePath
   const totalUnstaged = repo.modified.length + repo.untracked.length
 
   return (
@@ -225,6 +239,8 @@ export function ChangesPanel({ repo }: { repo: Repository }) {
             onDiscard={handleDiscard}
             onDiscardUntracked={handleDiscardUntracked}
             onDiscardStaged={handleDiscardStaged}
+            onSelect={handleSelect}
+            selected={isSelected(f.path)}
           />
         ))}
       </Section>
@@ -242,6 +258,8 @@ export function ChangesPanel({ repo }: { repo: Repository }) {
             onDiscard={handleDiscard}
             onDiscardUntracked={handleDiscardUntracked}
             onDiscardStaged={handleDiscardStaged}
+            onSelect={handleSelect}
+            selected={isSelected(f.path)}
           />
         ))}
       </Section>
@@ -259,6 +277,8 @@ export function ChangesPanel({ repo }: { repo: Repository }) {
             onDiscard={handleDiscard}
             onDiscardUntracked={handleDiscardUntracked}
             onDiscardStaged={handleDiscardStaged}
+            onSelect={handleSelect}
+            selected={isSelected(path)}
           />
         ))}
       </Section>

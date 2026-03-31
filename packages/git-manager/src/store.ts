@@ -44,6 +44,13 @@ interface GitManagerStore {
   setViewMode: (mode: ViewMode) => void
   setDetailTab: (tab: DetailTab) => void
 
+  // ── Diff ─────────────────────────────────────────────────────────────────
+  diffFile: { repoPath: string; filePath: string; type: 'staged' | 'modified' | 'untracked' } | null
+  diffContent: string | null
+  diffLoading: boolean
+  openDiff: (repoPath: string, filePath: string, type: 'staged' | 'modified' | 'untracked') => Promise<void>
+  closeDiff: () => void
+
   // ── Wizard ───────────────────────────────────────────────────────────────
   wizardOpen: boolean
   setWizardOpen: (open: boolean) => void
@@ -328,6 +335,29 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
   detailTab: 'changes',
   setViewMode: (mode) => set({ viewMode: mode }),
   setDetailTab: (tab) => set({ detailTab: tab }),
+
+  // ── Diff ─────────────────────────────────────────────────────────────────
+
+  diffFile: null,
+  diffContent: null,
+  diffLoading: false,
+  openDiff: async (repoPath, filePath, type) => {
+    set({ diffFile: { repoPath, filePath, type }, diffContent: null, diffLoading: true })
+    try {
+      let content: string
+      if (type === 'untracked') {
+        const raw = await gitIpc.fileContent(repoPath, filePath)
+        const lines = raw.split('\n')
+        content = lines.map((l, i) => `+${l}`).join('\n')
+      } else {
+        content = await gitIpc.getDiff(repoPath, filePath, type === 'staged')
+      }
+      set({ diffContent: content, diffLoading: false })
+    } catch {
+      set({ diffContent: null, diffLoading: false })
+    }
+  },
+  closeDiff: () => set({ diffFile: null, diffContent: null, diffLoading: false }),
 
   // ── Wizard ───────────────────────────────────────────────────────────────
 
