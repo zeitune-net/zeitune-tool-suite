@@ -9,15 +9,13 @@ import {
   Trash2,
   Undo2,
   ChevronDown,
-  ChevronRight,
-  Eye
+  ChevronRight
 } from 'lucide-react'
 import { Button } from '@shared/components/ui/button'
 import { Badge } from '@shared/components/ui/badge'
 import { useConfirm } from '@shared/components/ui/confirm-dialog'
 import { cn } from '@shared/lib/utils'
 import { useGitManagerStore } from '../store'
-import { DiffViewer } from './DiffViewer'
 import type { Repository, FileChange } from '../types'
 
 function fileIcon(status: string) {
@@ -43,8 +41,7 @@ function FileItem({
   onUnstage,
   onDiscard,
   onDiscardUntracked,
-  onDiscardStaged,
-  onViewDiff
+  onDiscardStaged
 }: {
   file: FileChange | string
   type: 'staged' | 'modified' | 'untracked'
@@ -54,7 +51,6 @@ function FileItem({
   onDiscard: (files: string[]) => void
   onDiscardUntracked: (files: string[]) => void
   onDiscardStaged: (files: string[]) => void
-  onViewDiff: (filePath: string, staged: boolean, isUntracked?: boolean) => void
 }) {
   const isString = typeof file === 'string'
   const path = isString ? file : file.path
@@ -64,25 +60,15 @@ function FileItem({
   return (
     <div className="group flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-muted/50">
       {fileIcon(status)}
-      <button
-        className="flex-1 truncate text-left text-xs font-mono hover:text-primary"
-        title={`${path} — cliquer pour voir le diff`}
-        onClick={() => onViewDiff(path, type === 'staged', type === 'untracked')}
+      <span
+        className="flex-1 truncate text-left text-xs font-mono"
+        title={path}
       >
         {fileName}
-      </button>
+      </span>
       <span className="text-[9px] text-muted-foreground">{path !== fileName ? path : ''}</span>
 
       <div className="hidden items-center gap-0.5 group-hover:flex">
-        {type !== 'untracked' && (
-          <button
-            onClick={() => onViewDiff(path, type === 'staged', false)}
-            className="rounded p-0.5 hover:bg-info/10 hover:text-info"
-            title="Voir le diff"
-          >
-            <Eye className="h-3 w-3" />
-          </button>
-        )}
         {type === 'staged' && (
           <>
             <button
@@ -172,7 +158,6 @@ function Section({
 
 export function ChangesPanel({ repo }: { repo: Repository }) {
   const { stageFiles, unstageFiles, stageAllFiles, discardFiles, discardUntrackedFiles, discardStagedFiles } = useGitManagerStore()
-  const [activeDiff, setActiveDiff] = useState<{ path: string; staged: boolean; isUntracked?: boolean } | null>(null)
   const { confirm, dialog: confirmDialog } = useConfirm()
 
   const handleStage = (files: string[]) => stageFiles(repo.path, files)
@@ -203,14 +188,6 @@ export function ChangesPanel({ repo }: { repo: Repository }) {
     })
     if (ok) discardUntrackedFiles(repo.path, files)
   }
-  const handleViewDiff = (filePath: string, staged: boolean, isUntracked?: boolean) => {
-    if (activeDiff?.path === filePath && activeDiff?.staged === staged) {
-      setActiveDiff(null)
-    } else {
-      setActiveDiff({ path: filePath, staged, isUntracked })
-    }
-  }
-
   const totalUnstaged = repo.modified.length + repo.untracked.length
 
   return (
@@ -248,7 +225,6 @@ export function ChangesPanel({ repo }: { repo: Repository }) {
             onDiscard={handleDiscard}
             onDiscardUntracked={handleDiscardUntracked}
             onDiscardStaged={handleDiscardStaged}
-            onViewDiff={handleViewDiff}
           />
         ))}
       </Section>
@@ -266,7 +242,6 @@ export function ChangesPanel({ repo }: { repo: Repository }) {
             onDiscard={handleDiscard}
             onDiscardUntracked={handleDiscardUntracked}
             onDiscardStaged={handleDiscardStaged}
-            onViewDiff={handleViewDiff}
           />
         ))}
       </Section>
@@ -284,21 +259,9 @@ export function ChangesPanel({ repo }: { repo: Repository }) {
             onDiscard={handleDiscard}
             onDiscardUntracked={handleDiscardUntracked}
             onDiscardStaged={handleDiscardStaged}
-            onViewDiff={handleViewDiff}
           />
         ))}
       </Section>
-
-      {/* Inline diff viewer */}
-      {activeDiff && (
-        <DiffViewer
-          repoPath={repo.path}
-          filePath={activeDiff.path}
-          staged={activeDiff.staged}
-          isUntracked={activeDiff.isUntracked}
-          onClose={() => setActiveDiff(null)}
-        />
-      )}
 
       {/* Empty state */}
       {repo.staged.length === 0 && repo.modified.length === 0 && repo.untracked.length === 0 && (

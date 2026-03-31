@@ -112,10 +112,6 @@ export interface PushResult {
   message: string
 }
 
-export interface DiffResult {
-  diff: string
-}
-
 // ── Batch operation ──────────────────────────────────────────────────────────
 
 export interface BatchOperationResult {

@@ -7,8 +7,7 @@ import type {
   StashListResult,
   MergeResult,
   PullResult,
-  PushResult,
-  DiffResult
+  PushResult
 } from '../types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -93,14 +92,6 @@ export const stashDrop = (repoPath: string, index: number) =>
 
 export const getLog = (repoPath: string, count?: number) =>
   invoke<LogResult>('git:log', repoPath, count)
-
-// ── Diff ───────────────────────────────────────────────────────────────────
-
-export const getDiff = (repoPath: string, file?: string, staged?: boolean) =>
-  invoke<DiffResult>('git:diff', repoPath, file, staged)
-
-export const getFileContent = (repoPath: string, filePath: string) =>
-  invoke<string | null>('git:fileContent', repoPath, filePath)
 
 // ── Shell actions ─────────────────────────────────────────────────────────
 

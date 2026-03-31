@@ -49,8 +49,6 @@ export function DevManagerView() {
     }
   }, [persistRuntimeState])
 
-  const hasLogs = services.some((s) => s.logs.length > 0)
-
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
@@ -71,7 +69,7 @@ export function DevManagerView() {
         <div className="flex items-center gap-2">
           {activeProfileId && <GroupActions />}
           <ProfileSelector />
-          {activeProfileId && hasLogs && (
+          {activeProfileId && (
             <Button
               variant="outline"
               size="sm"

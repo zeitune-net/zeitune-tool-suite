@@ -458,53 +458,6 @@ export function registerGitHandlers(): void {
     return { entries }
   })
 
-  // ── Diff ─────────────────────────────────────────────────────────────────
-
-  ipcMain.handle('git:diff', async (_e, repoPath: string, file?: string, staged?: boolean) => {
-    const args = ['diff', '--no-ext-diff', '--no-color']
-    if (staged) args.push('--cached')
-    if (file) args.push('--', file)
-    let diff = await gitSafe(repoPath, args)
-
-    // Fallback for staged files: if --cached returns empty, try diff-index
-    if (!diff && staged && file) {
-      diff = await gitSafe(repoPath, ['diff-index', '-p', '--cached', '--no-ext-diff', '--no-color', 'HEAD', '--', file])
-    }
-
-    // Final fallback: show staged content as new file diff
-    if (!diff && staged && file) {
-      try {
-        const content = await git(repoPath, ['show', `:${file}`])
-        if (content) {
-          const lines = content.split('\n').map((l: string) => '+' + l).join('\n')
-          diff = `diff --git a/${file} b/${file}\n--- /dev/null\n+++ b/${file}\n@@ -0,0 +1,${content.split('\n').length} @@\n${lines}`
-        }
-      } catch {
-        // no staged content available
-      }
-    }
-
-    return { diff }
-  })
-
-  // ── File content (for untracked files) ────────────────────────────────────
-
-  ipcMain.handle('git:fileContent', async (_e, repoPath: string, filePath: string) => {
-    const { resolve } = await import('path')
-    const fullPath = join(repoPath, filePath)
-    // Security: ensure the file is within the repo
-    const resolvedFull = resolve(fullPath)
-    const resolvedRepo = resolve(repoPath)
-    if (!resolvedFull.startsWith(resolvedRepo)) {
-      throw new Error('Path traversal detected')
-    }
-    try {
-      return await readFile(fullPath, 'utf-8')
-    } catch {
-      return null
-    }
-  })
-
   // ── Shell actions ─────────────────────────────────────────────────────────
 
   ipcMain.handle('shell:openInTerminal', async (_e, dirPath: string) => {

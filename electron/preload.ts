@@ -40,8 +40,6 @@ const INVOKE_CHANNELS = [
   'git:stashPop',
   'git:stashDrop',
   'git:log',
-  'git:diff',
-  'git:fileContent',
   // Shell actions
   'shell:openInTerminal',
   'shell:openInExplorer',
