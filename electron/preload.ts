@@ -79,7 +79,20 @@ const INVOKE_CHANNELS = [
   'dev:service:probe',
   'dev:process:list',
   'dev:runtime:load',
-  'dev:runtime:save'
+  'dev:runtime:save',
+  // DB Explorer
+  'db:profile:list',
+  'db:profile:save',
+  'db:profile:delete',
+  'db:test-connection',
+  'db:connect',
+  'db:disconnect',
+  'db:schemas',
+  'db:table-details',
+  'db:query',
+  'db:history:load',
+  'db:history:save',
+  'db:export'
 ]
 
 contextBridge.exposeInMainWorld('electron', {

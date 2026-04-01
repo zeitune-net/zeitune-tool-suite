@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { registerGitHandlers } from './git-handlers'
 import { registerDevHandlers } from './dev-handlers'
+import { registerDbHandlers } from './db-handlers'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -68,6 +69,7 @@ app.whenReady().then(() => {
 
   registerGitHandlers()
   registerDevHandlers()
+  registerDbHandlers()
   createWindow()
 
   app.on('activate', () => {
