@@ -6,7 +6,11 @@ import type {
   QueryResult,
   ConnectionTestResult,
   QueryHistoryEntry,
-  ExportFormat
+  ExportFormat,
+  SnapshotMetadata,
+  SnapshotData,
+  SnapshotCreateOptions,
+  RestoreOptions
 } from '@shared/types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -67,3 +71,29 @@ export const exportData = (data: {
   format: ExportFormat
   defaultName?: string
 }) => invoke<{ success: boolean; filePath?: string }>('db:export', data)
+
+// ── Snapshots ─────────────────────────────────────────────────────────────
+
+export const listSnapshots = () => invoke<SnapshotMetadata[]>('db:snapshot:list')
+
+export const getSnapshot = (snapshotId: string) =>
+  invoke<SnapshotData | null>('db:snapshot:get', snapshotId)
+
+export const deleteSnapshot = (snapshotId: string) =>
+  invoke<{ success: boolean; error?: string }>('db:snapshot:delete', snapshotId)
+
+export const createSnapshot = (options: SnapshotCreateOptions) =>
+  invoke<SnapshotMetadata>('db:snapshot:create', options)
+
+// ── Restore ───────────────────────────────────────────────────────────────
+
+export const executeRestore = (options: RestoreOptions) =>
+  invoke<{ success: boolean; rowsInserted?: number; tablesRestored?: number; error?: string }>('db:restore:execute', options)
+
+// ── Event listeners ───────────────────────────────────────────────────────
+
+export const onSnapshotProgress = (callback: (progress: { table: string; done: number; total: number }) => void) =>
+  ipc.on('db:snapshot:progress', callback)
+
+export const onRestoreProgress = (callback: (progress: Record<string, unknown>) => void) =>
+  ipc.on('db:restore:progress', callback)

@@ -10,14 +10,19 @@ import type {
   QueryHistoryEntry,
   DataBrowserFilter,
   PageSize,
-  ExportFormat
+  ExportFormat,
+  SnapshotMetadata,
+  SnapshotData,
+  SnapshotCreateOptions,
+  RestoreOptions,
+  RestoreProgress
 } from '@shared/types'
 import type { PublicProfile } from './services/db-ipc'
 import * as dbIpc from './services/db-ipc'
 
 // ── View Types ──────────────────────────────────────────────────────────────
 
-export type DbView = 'profiles' | 'explorer'
+export type DbView = 'profiles' | 'explorer' | 'snapshots'
 export type DetailTab = 'columns' | 'foreignKeys' | 'indexes'
 export type ExplorerPanel = 'query' | 'data-browser'
 
@@ -124,6 +129,21 @@ interface DbExplorerStore {
   // Schema filter
   schemaFilter: string
   setSchemaFilter: (filter: string) => void
+
+  // Snapshots
+  snapshots: SnapshotMetadata[]
+  snapshotsLoaded: boolean
+  snapshotCreating: boolean
+  snapshotProgress: { table: string; done: number; total: number } | null
+  loadSnapshots: () => Promise<void>
+  createSnapshot: (options: SnapshotCreateOptions) => Promise<SnapshotMetadata | null>
+  deleteSnapshot: (snapshotId: string) => Promise<boolean>
+  getSnapshot: (snapshotId: string) => Promise<SnapshotData | null>
+
+  // Restore
+  restoreRunning: boolean
+  restoreProgress: RestoreProgress | null
+  executeRestore: (options: RestoreOptions) => Promise<boolean>
 }
 
 export const useDbExplorerStore = create<DbExplorerStore>()((set, get) => ({
@@ -432,5 +452,67 @@ export const useDbExplorerStore = create<DbExplorerStore>()((set, get) => ({
 
   // Schema filter
   schemaFilter: '',
-  setSchemaFilter: (filter) => set({ schemaFilter: filter })
+  setSchemaFilter: (filter) => set({ schemaFilter: filter }),
+
+  // Snapshots
+  snapshots: [],
+  snapshotsLoaded: false,
+  snapshotCreating: false,
+  snapshotProgress: null,
+  loadSnapshots: async () => {
+    const snapshots = await dbIpc.listSnapshots()
+    set({ snapshots, snapshotsLoaded: true })
+  },
+  createSnapshot: async (options) => {
+    set({ snapshotCreating: true, snapshotProgress: null })
+    const unsub = dbIpc.onSnapshotProgress((progress) => {
+      set({ snapshotProgress: progress })
+    })
+    try {
+      const metadata = await dbIpc.createSnapshot(options)
+      set((s) => ({
+        snapshots: [metadata, ...s.snapshots],
+        snapshotCreating: false,
+        snapshotProgress: null
+      }))
+      return metadata
+    } catch {
+      set({ snapshotCreating: false, snapshotProgress: null })
+      return null
+    } finally {
+      unsub?.()
+    }
+  },
+  deleteSnapshot: async (snapshotId) => {
+    const result = await dbIpc.deleteSnapshot(snapshotId)
+    if (result.success) {
+      set((s) => ({
+        snapshots: s.snapshots.filter((snap) => snap.id !== snapshotId)
+      }))
+    }
+    return result.success
+  },
+  getSnapshot: async (snapshotId) => {
+    return dbIpc.getSnapshot(snapshotId)
+  },
+
+  // Restore
+  restoreRunning: false,
+  restoreProgress: null,
+  executeRestore: async (options) => {
+    set({ restoreRunning: true, restoreProgress: { phase: 'preparing', tablesTotal: 0, tablesDone: 0, rowsInserted: 0 } })
+    const unsub = dbIpc.onRestoreProgress((progress) => {
+      set({ restoreProgress: progress as RestoreProgress })
+    })
+    try {
+      const result = await dbIpc.executeRestore(options)
+      set({ restoreRunning: false })
+      return result.success
+    } catch {
+      set({ restoreRunning: false })
+      return false
+    } finally {
+      unsub?.()
+    }
+  }
 }))

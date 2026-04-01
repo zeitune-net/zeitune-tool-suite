@@ -8,17 +8,24 @@ import { ConnectionSwitcher } from './ConnectionSwitcher'
 import { QueryTabs } from './QueryTabs'
 import { QueryHistory } from './QueryHistory'
 import { DataBrowser } from './DataBrowser'
+import { SnapshotManager } from './SnapshotManager'
+import { Camera } from 'lucide-react'
 import { cn } from '@shared/lib/utils'
 
 export function DbExplorerView() {
   const {
-    view, profiles, activeProfileId, activeConnectionId, selectedTable,
+    view, setView, profiles, activeProfileId, activeConnectionId, selectedTable,
     explorerPanel, setExplorerPanel, showHistory
   } = useDbExplorerStore()
 
   // Profile view
   if (view === 'profiles' || !activeProfileId) {
     return <ProfileManager />
+  }
+
+  // Snapshot view
+  if (view === 'snapshots') {
+    return <SnapshotManager />
   }
 
   // Explorer view
@@ -63,8 +70,18 @@ export function DbExplorerView() {
             </div>
           )}
         </div>
-        <div className="text-xs text-muted-foreground">
-          {profile.name}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setView('snapshots')}
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            title="Snapshots"
+          >
+            <Camera className="h-3.5 w-3.5" />
+            Snapshots
+          </button>
+          <span className="text-xs text-muted-foreground">
+            {profile.name}
+          </span>
         </div>
       </div>
 

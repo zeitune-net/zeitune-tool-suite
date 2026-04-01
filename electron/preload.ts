@@ -5,7 +5,9 @@ const SEND_CHANNELS = ['window:minimize', 'window:maximize', 'window:close']
 const ON_CHANNELS = [
   'window:maximized-changed',
   'dev:service:log',
-  'dev:service:status'
+  'dev:service:status',
+  'db:snapshot:progress',
+  'db:restore:progress'
 ]
 
 const INVOKE_CHANNELS = [
@@ -92,7 +94,12 @@ const INVOKE_CHANNELS = [
   'db:query',
   'db:history:load',
   'db:history:save',
-  'db:export'
+  'db:export',
+  'db:snapshot:list',
+  'db:snapshot:get',
+  'db:snapshot:delete',
+  'db:snapshot:create',
+  'db:restore:execute'
 ]
 
 contextBridge.exposeInMainWorld('electron', {

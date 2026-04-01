@@ -130,3 +130,63 @@ export type PageSize = 25 | 50 | 100 | 500
 // ── Export ──────────────────────────────────────────────────────────────────
 
 export type ExportFormat = 'csv' | 'json'
+
+// ── Snapshots ─────────────────────────────────────────────────────────────
+
+export interface SnapshotTableData {
+  schema: string
+  table: string
+  columns: ColumnInfo[]
+  primaryKey: string[]
+  foreignKeys: ForeignKeyInfo[]
+  rows: Record<string, unknown>[]
+  rowCount: number
+}
+
+export interface SnapshotMetadata {
+  id: string
+  name: string
+  profileId: string
+  profileName: string
+  connectionId: string
+  connectionName: string
+  database: string
+  tables: { schema: string; table: string; rowCount: number }[]
+  totalRows: number
+  createdAt: number
+}
+
+export interface SnapshotData {
+  metadata: SnapshotMetadata
+  tables: SnapshotTableData[]
+}
+
+export interface SnapshotCreateOptions {
+  name: string
+  profileId: string
+  profileName: string
+  connectionId: string
+  connectionName: string
+  connection: DbConnectionEntry
+  /** If empty, snapshot all tables */
+  selectedTables?: { schema: string; table: string }[]
+}
+
+export type RestoreConflictStrategy = 'upsert' | 'skip' | 'replace' | 'fail'
+
+export interface RestoreOptions {
+  snapshotId: string
+  targetConnection: DbConnectionEntry
+  conflictStrategy: RestoreConflictStrategy
+  selectedTables?: { schema: string; table: string }[]
+  resetSequences: boolean
+}
+
+export interface RestoreProgress {
+  phase: 'preparing' | 'restoring' | 'sequences' | 'done' | 'error'
+  currentTable?: string
+  tablesTotal: number
+  tablesDone: number
+  rowsInserted: number
+  error?: string
+}

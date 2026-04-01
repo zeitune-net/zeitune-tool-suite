@@ -19,7 +19,14 @@ export type {
   FilterOperator,
   DataBrowserFilter,
   PageSize,
-  ExportFormat
+  ExportFormat,
+  SnapshotTableData,
+  SnapshotMetadata,
+  SnapshotData,
+  SnapshotCreateOptions,
+  RestoreConflictStrategy,
+  RestoreOptions,
+  RestoreProgress
 } from './db-explorer'
 
 export interface ModuleDefinition {
