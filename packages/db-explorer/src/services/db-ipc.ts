@@ -10,7 +10,15 @@ import type {
   SnapshotMetadata,
   SnapshotData,
   SnapshotCreateOptions,
-  RestoreOptions
+  RestoreOptions,
+  SchemaDiffResult,
+  SnapshotTableData,
+  TransformPipeline,
+  DataSet,
+  DataSetStatus,
+  SavedQuery,
+  RowMutationResult,
+  MonitorStats
 } from '@shared/types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -97,3 +105,75 @@ export const onSnapshotProgress = (callback: (progress: { table: string; done: n
 
 export const onRestoreProgress = (callback: (progress: Record<string, unknown>) => void) =>
   ipc.on('db:restore:progress', callback)
+
+// ── Schema Diff ──────────────────────────────────────────────────────────
+
+export const computeSchemaDiff = (data: {
+  snapshotTables: SnapshotTableData[]
+  targetConnection: DbConnectionEntry
+}) => invoke<SchemaDiffResult>('db:schema-diff', data)
+
+// ── Pipelines ────────────────────────────────────────────────────────────
+
+export const listPipelines = () => invoke<TransformPipeline[]>('db:pipeline:list')
+
+export const getPipeline = (pipelineId: string) =>
+  invoke<TransformPipeline | null>('db:pipeline:get', pipelineId)
+
+export const savePipeline = (pipeline: TransformPipeline) =>
+  invoke<TransformPipeline>('db:pipeline:save', pipeline)
+
+export const deletePipeline = (pipelineId: string) =>
+  invoke<{ success: boolean; error?: string }>('db:pipeline:delete', pipelineId)
+
+// ── Data Sets ────────────────────────────────────────────────────────────
+
+export const listDatasets = () => invoke<DataSet[]>('db:dataset:list')
+
+export const getDataset = (datasetId: string) =>
+  invoke<DataSet | null>('db:dataset:get', datasetId)
+
+export const saveDataset = (dataset: DataSet) =>
+  invoke<DataSet>('db:dataset:save', dataset)
+
+export const deleteDataset = (datasetId: string) =>
+  invoke<{ success: boolean; error?: string }>('db:dataset:delete', datasetId)
+
+export const checkDatasetStatus = (datasetId: string, targetConnection?: DbConnectionEntry) =>
+  invoke<DataSetStatus>('db:dataset:check-status', datasetId, targetConnection)
+
+// ── Saved Queries ──────────────────────────────────────────────────────
+
+export const listSavedQueries = () => invoke<SavedQuery[]>('db:saved-query:list')
+
+export const saveSavedQuery = (query: SavedQuery) =>
+  invoke<SavedQuery>('db:saved-query:save', query)
+
+export const deleteSavedQuery = (queryId: string) =>
+  invoke<{ success: boolean; error?: string }>('db:saved-query:delete', queryId)
+
+// ── Row Mutations ──────────────────────────────────────────────────────
+
+export const updateRow = (data: {
+  connection: DbConnectionEntry
+  schema: string; table: string
+  primaryKey: Record<string, unknown>
+  changes: Record<string, unknown>
+}) => invoke<RowMutationResult>('db:row:update', data)
+
+export const insertRow = (data: {
+  connection: DbConnectionEntry
+  schema: string; table: string
+  row: Record<string, unknown>
+}) => invoke<RowMutationResult>('db:row:insert', data)
+
+export const deleteRow = (data: {
+  connection: DbConnectionEntry
+  schema: string; table: string
+  primaryKey: Record<string, unknown>
+}) => invoke<RowMutationResult>('db:row:delete', data)
+
+// ── Monitoring ─────────────────────────────────────────────────────────
+
+export const getMonitorStats = (conn: DbConnectionEntry) =>
+  invoke<MonitorStats>('db:monitor:stats', conn)

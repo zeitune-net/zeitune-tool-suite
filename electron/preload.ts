@@ -14,6 +14,7 @@ const INVOKE_CHANNELS = [
   'window:isMaximized',
   // Dialog
   'dialog:openDirectory',
+  'dialog:openFile',
   // Profiles
   'profile:list',
   'profile:save',
@@ -99,7 +100,30 @@ const INVOKE_CHANNELS = [
   'db:snapshot:get',
   'db:snapshot:delete',
   'db:snapshot:create',
-  'db:restore:execute'
+  'db:restore:execute',
+  // Schema Diff
+  'db:schema-diff',
+  // Pipelines
+  'db:pipeline:list',
+  'db:pipeline:get',
+  'db:pipeline:save',
+  'db:pipeline:delete',
+  // Data Sets
+  'db:dataset:list',
+  'db:dataset:get',
+  'db:dataset:save',
+  'db:dataset:delete',
+  'db:dataset:check-status',
+  // Saved Queries
+  'db:saved-query:list',
+  'db:saved-query:save',
+  'db:saved-query:delete',
+  // Row Mutations
+  'db:row:update',
+  'db:row:insert',
+  'db:row:delete',
+  // Monitoring
+  'db:monitor:stats'
 ]
 
 contextBridge.exposeInMainWorld('electron', {

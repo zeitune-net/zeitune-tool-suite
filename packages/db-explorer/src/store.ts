@@ -15,7 +15,14 @@ import type {
   SnapshotData,
   SnapshotCreateOptions,
   RestoreOptions,
-  RestoreProgress
+  RestoreProgress,
+  SchemaDiffResult,
+  TransformPipeline,
+  TableTransform,
+  DataSet,
+  DataSetStatus,
+  SavedQuery,
+  MonitorStats
 } from '@shared/types'
 import type { PublicProfile } from './services/db-ipc'
 import * as dbIpc from './services/db-ipc'
@@ -24,7 +31,7 @@ import * as dbIpc from './services/db-ipc'
 
 export type DbView = 'profiles' | 'explorer' | 'snapshots'
 export type DetailTab = 'columns' | 'foreignKeys' | 'indexes'
-export type ExplorerPanel = 'query' | 'data-browser'
+export type ExplorerPanel = 'query' | 'data-browser' | 'monitor'
 
 interface ConnectionState {
   status: ConnectionStatus
@@ -144,6 +151,55 @@ interface DbExplorerStore {
   restoreRunning: boolean
   restoreProgress: RestoreProgress | null
   executeRestore: (options: RestoreOptions) => Promise<boolean>
+
+  // Schema Diff
+  schemaDiff: SchemaDiffResult | null
+  schemaDiffLoading: boolean
+  computeSchemaDiff: (snapshotData: SnapshotData, targetConn: DbConnectionEntry) => Promise<SchemaDiffResult | null>
+
+  // Current pipeline (in-progress during wizard)
+  currentPipeline: TransformPipeline | null
+  setCurrentPipeline: (pipeline: TransformPipeline | null) => void
+  updateTableTransform: (sourceSchema: string, sourceTable: string, updates: Partial<TableTransform>) => void
+
+  // Saved pipelines
+  pipelines: TransformPipeline[]
+  pipelinesLoaded: boolean
+  loadPipelines: () => Promise<void>
+  savePipeline: (pipeline: TransformPipeline) => Promise<TransformPipeline | null>
+  deletePipeline: (pipelineId: string) => Promise<boolean>
+
+  // Data Sets
+  datasets: DataSet[]
+  datasetsLoaded: boolean
+  loadDatasets: () => Promise<void>
+  saveDataset: (dataset: DataSet) => Promise<DataSet | null>
+  deleteDataset: (datasetId: string) => Promise<boolean>
+  checkDatasetStatus: (datasetId: string, conn?: DbConnectionEntry) => Promise<DataSetStatus>
+
+  // Saved Queries
+  savedQueries: SavedQuery[]
+  savedQueriesLoaded: boolean
+  showSavedQueries: boolean
+  setShowSavedQueries: (show: boolean) => void
+  loadSavedQueries: () => Promise<void>
+  saveQuery: (query: SavedQuery) => Promise<SavedQuery | null>
+  deleteSavedQuery: (id: string) => Promise<boolean>
+
+  // Inline Editing
+  dataBrowserEditing: boolean
+  dataBrowserPendingChanges: Record<string, Record<string, unknown>>
+  setDataBrowserEditing: (editing: boolean) => void
+  setCellValue: (rowKey: string, column: string, value: unknown) => void
+  discardChanges: () => void
+  commitChanges: (conn: DbConnectionEntry) => Promise<{ success: boolean; errors: string[] }>
+  insertNewRow: (conn: DbConnectionEntry, row: Record<string, unknown>) => Promise<boolean>
+  deleteRow: (conn: DbConnectionEntry, primaryKey: Record<string, unknown>) => Promise<boolean>
+
+  // Monitoring
+  monitorStats: MonitorStats | null
+  monitorLoading: boolean
+  loadMonitorStats: (conn: DbConnectionEntry) => Promise<void>
 }
 
 export const useDbExplorerStore = create<DbExplorerStore>()((set, get) => ({
@@ -387,40 +443,30 @@ export const useDbExplorerStore = create<DbExplorerStore>()((set, get) => ({
 
     set({ dataBrowserLoading: true })
 
-    const qualifiedTable = `"${dataBrowserSchema}"."${dataBrowserTable}"`
+    // Dialect-aware quoting
+    const q = (name: string) => {
+      if (conn.type === 'mysql') return `\`${name}\``
+      return `"${name}"`
+    }
+    const qualifiedTable = conn.type === 'sqlite'
+      ? q(dataBrowserTable)
+      : `${q(dataBrowserSchema)}.${q(dataBrowserTable)}`
 
-    // Build WHERE clause
-    const whereParts: string[] = []
-    const params: string[] = []
-    dataBrowserFilters.forEach((f) => {
-      if (f.operator === 'IS NULL') {
-        whereParts.push(`"${f.column}" IS NULL`)
-      } else if (f.operator === 'IS NOT NULL') {
-        whereParts.push(`"${f.column}" IS NOT NULL`)
-      } else {
-        params.push(f.value)
-        whereParts.push(`"${f.column}" ${f.operator} $${params.length}`)
-      }
-    })
-    const whereClause = whereParts.length > 0 ? ` WHERE ${whereParts.join(' AND ')}` : ''
+    // Build WHERE clause with escaped values
+    const escapeValue = (v: string) => v.replace(/'/g, "''")
+    const whereClauseRaw = dataBrowserFilters.length > 0
+      ? ` WHERE ${dataBrowserFilters.map((f) => {
+          if (f.operator === 'IS NULL') return `${q(f.column)} IS NULL`
+          if (f.operator === 'IS NOT NULL') return `${q(f.column)} IS NOT NULL`
+          return `${q(f.column)} ${f.operator} '${escapeValue(f.value)}'`
+        }).join(' AND ')}`
+      : ''
 
-    // Build ORDER BY
     const orderClause = dataBrowserSortColumn
-      ? ` ORDER BY "${dataBrowserSortColumn}" ${dataBrowserSortDir.toUpperCase()}`
+      ? ` ORDER BY ${q(dataBrowserSortColumn)} ${dataBrowserSortDir.toUpperCase()}`
       : ''
 
     const offset = dataBrowserPage * dataBrowserPageSize
-
-    // Count query — use parameterized approach via raw SQL (params embedded safely)
-    // Since db:query doesn't support parameterized queries, we escape values manually
-    const escapeValue = (v: string) => v.replace(/'/g, "''")
-    const whereClauseRaw = whereParts.length > 0
-      ? ` WHERE ${dataBrowserFilters.map((f) => {
-          if (f.operator === 'IS NULL') return `"${f.column}" IS NULL`
-          if (f.operator === 'IS NOT NULL') return `"${f.column}" IS NOT NULL`
-          return `"${f.column}" ${f.operator} '${escapeValue(f.value)}'`
-        }).join(' AND ')}`
-      : ''
 
     const countSql = `SELECT COUNT(*) as total FROM ${qualifiedTable}${whereClauseRaw}`
     const dataSql = `SELECT * FROM ${qualifiedTable}${whereClauseRaw}${orderClause} LIMIT ${dataBrowserPageSize} OFFSET ${offset}`
@@ -513,6 +559,221 @@ export const useDbExplorerStore = create<DbExplorerStore>()((set, get) => ({
       return false
     } finally {
       unsub?.()
+    }
+  },
+
+  // Schema Diff
+  schemaDiff: null,
+  schemaDiffLoading: false,
+  computeSchemaDiff: async (snapshotData, targetConn) => {
+    set({ schemaDiffLoading: true, schemaDiff: null })
+    try {
+      const result = await dbIpc.computeSchemaDiff({
+        snapshotTables: snapshotData.tables,
+        targetConnection: targetConn
+      })
+      set({ schemaDiff: result, schemaDiffLoading: false })
+      return result
+    } catch {
+      set({ schemaDiffLoading: false })
+      return null
+    }
+  },
+
+  // Current pipeline
+  currentPipeline: null,
+  setCurrentPipeline: (pipeline) => set({ currentPipeline: pipeline }),
+  updateTableTransform: (sourceSchema, sourceTable, updates) => {
+    set((s) => {
+      if (!s.currentPipeline) return s
+      const transforms = s.currentPipeline.tableTransforms.map((t) =>
+        t.sourceSchema === sourceSchema && t.sourceTable === sourceTable
+          ? { ...t, ...updates }
+          : t
+      )
+      return {
+        currentPipeline: { ...s.currentPipeline, tableTransforms: transforms, updatedAt: Date.now() }
+      }
+    })
+  },
+
+  // Saved pipelines
+  pipelines: [],
+  pipelinesLoaded: false,
+  loadPipelines: async () => {
+    const pipelines = await dbIpc.listPipelines()
+    set({ pipelines, pipelinesLoaded: true })
+  },
+  savePipeline: async (pipeline) => {
+    try {
+      const saved = await dbIpc.savePipeline(pipeline)
+      set((s) => {
+        const idx = s.pipelines.findIndex((p) => p.id === saved.id)
+        const pipelines = idx >= 0
+          ? s.pipelines.map((p) => p.id === saved.id ? saved : p)
+          : [saved, ...s.pipelines]
+        return { pipelines }
+      })
+      return saved
+    } catch {
+      return null
+    }
+  },
+  deletePipeline: async (pipelineId) => {
+    const result = await dbIpc.deletePipeline(pipelineId)
+    if (result.success) {
+      set((s) => ({ pipelines: s.pipelines.filter((p) => p.id !== pipelineId) }))
+    }
+    return result.success
+  },
+
+  // Data Sets
+  datasets: [],
+  datasetsLoaded: false,
+  loadDatasets: async () => {
+    const datasets = await dbIpc.listDatasets()
+    set({ datasets, datasetsLoaded: true })
+  },
+  saveDataset: async (dataset) => {
+    try {
+      const saved = await dbIpc.saveDataset(dataset)
+      set((s) => {
+        const idx = s.datasets.findIndex((d) => d.id === saved.id)
+        const datasets = idx >= 0
+          ? s.datasets.map((d) => d.id === saved.id ? saved : d)
+          : [saved, ...s.datasets]
+        return { datasets }
+      })
+      return saved
+    } catch {
+      return null
+    }
+  },
+  deleteDataset: async (datasetId) => {
+    const result = await dbIpc.deleteDataset(datasetId)
+    if (result.success) {
+      set((s) => ({ datasets: s.datasets.filter((d) => d.id !== datasetId) }))
+    }
+    return result.success
+  },
+  checkDatasetStatus: async (datasetId, conn) => {
+    return dbIpc.checkDatasetStatus(datasetId, conn)
+  },
+
+  // Saved Queries
+  savedQueries: [],
+  savedQueriesLoaded: false,
+  showSavedQueries: false,
+  setShowSavedQueries: (show) => set({ showSavedQueries: show }),
+  loadSavedQueries: async () => {
+    const queries = await dbIpc.listSavedQueries()
+    set({ savedQueries: queries, savedQueriesLoaded: true })
+  },
+  saveQuery: async (query) => {
+    try {
+      const saved = await dbIpc.saveSavedQuery(query)
+      set((s) => {
+        const idx = s.savedQueries.findIndex((q) => q.id === saved.id)
+        const savedQueries = idx >= 0
+          ? s.savedQueries.map((q) => q.id === saved.id ? saved : q)
+          : [saved, ...s.savedQueries]
+        return { savedQueries }
+      })
+      return saved
+    } catch {
+      return null
+    }
+  },
+  deleteSavedQuery: async (id) => {
+    const result = await dbIpc.deleteSavedQuery(id)
+    if (result.success) {
+      set((s) => ({ savedQueries: s.savedQueries.filter((q) => q.id !== id) }))
+    }
+    return result.success
+  },
+
+  // Inline Editing
+  dataBrowserEditing: false,
+  dataBrowserPendingChanges: {},
+  setDataBrowserEditing: (editing) => set({
+    dataBrowserEditing: editing,
+    dataBrowserPendingChanges: editing ? {} : {}
+  }),
+  setCellValue: (rowKey, column, value) => {
+    set((s) => {
+      const existing = s.dataBrowserPendingChanges[rowKey] ?? {}
+      return {
+        dataBrowserPendingChanges: {
+          ...s.dataBrowserPendingChanges,
+          [rowKey]: { ...existing, [column]: value }
+        }
+      }
+    })
+  },
+  discardChanges: () => set({ dataBrowserPendingChanges: {} }),
+  commitChanges: async (conn) => {
+    const { dataBrowserSchema, dataBrowserTable, dataBrowserPendingChanges } = get()
+    if (!dataBrowserSchema || !dataBrowserTable) return { success: false, errors: ['No table selected'] }
+
+    const errors: string[] = []
+    for (const [rowKey, changes] of Object.entries(dataBrowserPendingChanges)) {
+      const primaryKey = JSON.parse(rowKey) as Record<string, unknown>
+      const result = await dbIpc.updateRow({
+        connection: conn,
+        schema: dataBrowserSchema,
+        table: dataBrowserTable,
+        primaryKey,
+        changes
+      })
+      if (!result.success) {
+        errors.push(result.error ?? `Failed to update row ${rowKey}`)
+      }
+    }
+
+    set({ dataBrowserPendingChanges: {} })
+    // Reload data
+    get().loadDataBrowserPage(conn)
+    return { success: errors.length === 0, errors }
+  },
+  insertNewRow: async (conn, row) => {
+    const { dataBrowserSchema, dataBrowserTable } = get()
+    if (!dataBrowserSchema || !dataBrowserTable) return false
+    const result = await dbIpc.insertRow({
+      connection: conn,
+      schema: dataBrowserSchema,
+      table: dataBrowserTable,
+      row
+    })
+    if (result.success) {
+      get().loadDataBrowserPage(conn)
+    }
+    return result.success
+  },
+  deleteRow: async (conn, primaryKey) => {
+    const { dataBrowserSchema, dataBrowserTable } = get()
+    if (!dataBrowserSchema || !dataBrowserTable) return false
+    const result = await dbIpc.deleteRow({
+      connection: conn,
+      schema: dataBrowserSchema,
+      table: dataBrowserTable,
+      primaryKey
+    })
+    if (result.success) {
+      get().loadDataBrowserPage(conn)
+    }
+    return result.success
+  },
+
+  // Monitoring
+  monitorStats: null,
+  monitorLoading: false,
+  loadMonitorStats: async (conn) => {
+    set({ monitorLoading: true })
+    try {
+      const stats = await dbIpc.getMonitorStats(conn)
+      set({ monitorStats: stats, monitorLoading: false })
+    } catch {
+      set({ monitorLoading: false })
     }
   }
 }))

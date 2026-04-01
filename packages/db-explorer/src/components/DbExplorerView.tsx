@@ -7,15 +7,17 @@ import { TableDetails } from './TableDetails'
 import { ConnectionSwitcher } from './ConnectionSwitcher'
 import { QueryTabs } from './QueryTabs'
 import { QueryHistory } from './QueryHistory'
+import { SavedQueries } from './SavedQueries'
 import { DataBrowser } from './DataBrowser'
+import { MonitorPanel } from './MonitorPanel'
 import { SnapshotManager } from './SnapshotManager'
-import { Camera } from 'lucide-react'
+import { Camera, Activity } from 'lucide-react'
 import { cn } from '@shared/lib/utils'
 
 export function DbExplorerView() {
   const {
     view, setView, profiles, activeProfileId, activeConnectionId, selectedTable,
-    explorerPanel, setExplorerPanel, showHistory
+    explorerPanel, setExplorerPanel, showHistory, showSavedQueries
   } = useDbExplorerStore()
 
   // Profile view
@@ -67,6 +69,17 @@ export function DbExplorerView() {
               >
                 Browse
               </button>
+              <button
+                onClick={() => setExplorerPanel('monitor')}
+                className={cn(
+                  'rounded-md px-3 py-1 text-xs font-medium transition-colors',
+                  explorerPanel === 'monitor'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                Monitor
+              </button>
             </div>
           )}
         </div>
@@ -106,9 +119,12 @@ export function DbExplorerView() {
                 <ResultsTable />
               </div>
               {showHistory && <QueryHistory />}
+              {showSavedQueries && <SavedQueries />}
             </div>
-          ) : (
+          ) : explorerPanel === 'data-browser' ? (
             <DataBrowser connection={activeConnection} />
+          ) : (
+            <MonitorPanel connection={activeConnection} />
           )}
 
           {/* Right: Table details */}

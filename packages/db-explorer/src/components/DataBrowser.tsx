@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   Plus, Trash2, Play, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  ArrowUpDown, ArrowUp, ArrowDown, Download, Filter, TableIcon
+  ArrowUpDown, ArrowUp, ArrowDown, Download, Filter, TableIcon, Pencil, Save, X, Check
 } from 'lucide-react'
 import { Button } from '@shared/components/ui/button'
 import { cn } from '@shared/lib/utils'
+import { InsertRowDialog } from './InsertRowDialog'
 import { useDbExplorerStore } from '../store'
 import type { DbConnectionEntry, DataBrowserFilter, FilterOperator, PageSize, ExportFormat } from '@shared/types'
 
@@ -18,8 +19,23 @@ export function DataBrowser({ connection }: { connection: DbConnectionEntry }) {
     dataBrowserSortDir, dataBrowserPage, dataBrowserPageSize, dataBrowserResult,
     dataBrowserLoading, dataBrowserTotalRows, setDataBrowserFilters, setDataBrowserSort,
     setDataBrowserPage, setDataBrowserPageSize, loadDataBrowserPage, exportResults,
-    selectedSchema, selectedTable, setDataBrowserTarget, schemas, activeConnectionId
+    selectedSchema, selectedTable, setDataBrowserTarget, schemas, activeConnectionId,
+    dataBrowserEditing, dataBrowserPendingChanges, setDataBrowserEditing,
+    setCellValue, discardChanges, commitChanges, insertNewRow, deleteRow
   } = useDbExplorerStore()
+
+  const [showInsertDialog, setShowInsertDialog] = useState(false)
+  const [editingCell, setEditingCell] = useState<{ rowIdx: number; col: string } | null>(null)
+  const [editValue, setEditValue] = useState('')
+  const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null)
+  const [commitError, setCommitError] = useState<string | null>(null)
+
+  // Get table details for PK info
+  const detailKey = activeConnectionId && dataBrowserSchema && dataBrowserTable
+    ? `${activeConnectionId}:${dataBrowserSchema}.${dataBrowserTable}` : null
+  const tableInfo = detailKey ? useDbExplorerStore.getState().tableDetails[detailKey] : undefined
+  const pkColumns = tableInfo?.primaryKey ?? []
+  const canEdit = pkColumns.length > 0
 
   // Sync schema tree selection → data browser target
   useEffect(() => {
@@ -34,6 +50,12 @@ export function DataBrowser({ connection }: { connection: DbConnectionEntry }) {
       loadDataBrowserPage(connection)
     }
   }, [dataBrowserSchema, dataBrowserTable, dataBrowserFilters, dataBrowserSortColumn, dataBrowserSortDir, dataBrowserPage, dataBrowserPageSize, connection, loadDataBrowserPage])
+
+  // Exit edit mode when changing table
+  useEffect(() => {
+    setDataBrowserEditing(false)
+    setEditingCell(null)
+  }, [dataBrowserSchema, dataBrowserTable, setDataBrowserEditing])
 
   const totalPages = Math.max(1, Math.ceil(dataBrowserTotalRows / dataBrowserPageSize))
 
@@ -51,6 +73,51 @@ export function DataBrowser({ connection }: { connection: DbConnectionEntry }) {
     const name = `${dataBrowserTable ?? 'export'}.${format}`
     exportResults(colNames, dataBrowserResult.rows, format, name)
   }
+
+  const getRowPk = (row: Record<string, unknown>): Record<string, unknown> => {
+    const pk: Record<string, unknown> = {}
+    for (const col of pkColumns) {
+      pk[col] = row[col]
+    }
+    return pk
+  }
+
+  const getRowKey = (row: Record<string, unknown>): string => {
+    return JSON.stringify(getRowPk(row))
+  }
+
+  const handleCellDoubleClick = (rowIdx: number, col: string, currentValue: unknown) => {
+    if (!dataBrowserEditing || !canEdit) return
+    setEditingCell({ rowIdx, col })
+    setEditValue(currentValue === null || currentValue === undefined ? '' : String(currentValue))
+  }
+
+  const handleCellSave = (row: Record<string, unknown>) => {
+    if (!editingCell) return
+    const rowKey = getRowKey(row)
+    let parsedValue: unknown = editValue
+    if (editValue === '' || editValue.toLowerCase() === 'null') parsedValue = null
+    else if (editValue.toLowerCase() === 'true') parsedValue = true
+    else if (editValue.toLowerCase() === 'false') parsedValue = false
+    setCellValue(rowKey, editingCell.col, parsedValue)
+    setEditingCell(null)
+  }
+
+  const handleCommit = async () => {
+    setCommitError(null)
+    const result = await commitChanges(connection)
+    if (!result.success) {
+      setCommitError(result.errors.join('; '))
+    }
+  }
+
+  const handleDeleteRow = async (row: Record<string, unknown>) => {
+    const pk = getRowPk(row)
+    await deleteRow(connection, pk)
+    setDeleteConfirm(null)
+  }
+
+  const pendingCount = Object.keys(dataBrowserPendingChanges).length
 
   if (!dataBrowserSchema || !dataBrowserTable) {
     return (
@@ -72,6 +139,35 @@ export function DataBrowser({ connection }: { connection: DbConnectionEntry }) {
           ({dataBrowserTotalRows.toLocaleString()} rows)
         </span>
         <div className="ml-auto flex items-center gap-1.5">
+          {dataBrowserEditing && (
+            <>
+              {pendingCount > 0 && (
+                <>
+                  <Button size="sm" onClick={handleCommit}>
+                    <Save className="mr-1 h-3 w-3" />
+                    Save ({pendingCount})
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={discardChanges}>
+                    Discard
+                  </Button>
+                </>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => setShowInsertDialog(true)}>
+                <Plus className="mr-1 h-3 w-3" />
+                Add Row
+              </Button>
+            </>
+          )}
+          <Button
+            size="sm"
+            variant={dataBrowserEditing ? 'default' : 'ghost'}
+            onClick={() => setDataBrowserEditing(!dataBrowserEditing)}
+            disabled={!canEdit}
+            title={canEdit ? 'Toggle edit mode' : 'No primary key — editing disabled'}
+          >
+            <Pencil className="mr-1 h-3 w-3" />
+            Edit
+          </Button>
           <Button size="sm" variant="ghost" onClick={() => handleExport('csv')} disabled={!dataBrowserResult?.rows?.length}>
             <Download className="mr-1 h-3 w-3" />
             CSV
@@ -82,6 +178,10 @@ export function DataBrowser({ connection }: { connection: DbConnectionEntry }) {
           </Button>
         </div>
       </div>
+
+      {commitError && (
+        <div className="bg-destructive/10 px-4 py-2 text-xs text-destructive">{commitError}</div>
+      )}
 
       {/* Filters */}
       <FilterBar
@@ -127,21 +227,91 @@ export function DataBrowser({ connection }: { connection: DbConnectionEntry }) {
                     </div>
                   </th>
                 ))}
+                {dataBrowserEditing && <th className="w-10" />}
               </tr>
             </thead>
             <tbody>
-              {dataBrowserResult.rows.map((row, idx) => (
-                <tr key={idx} className="border-b border-border/50 transition-colors hover:bg-accent/50">
-                  <td className="px-3 py-2 text-[10px] text-muted-foreground">
-                    {dataBrowserPage * dataBrowserPageSize + idx + 1}
-                  </td>
-                  {dataBrowserResult.columns.map((col) => (
-                    <td key={col.name} className="px-4 py-2 font-mono text-xs">
-                      <CellValue value={row[col.name]} />
+              {dataBrowserResult.rows.map((row, idx) => {
+                const rowKey = canEdit ? getRowKey(row) : ''
+                const rowChanges = dataBrowserPendingChanges[rowKey]
+                return (
+                  <tr key={idx} className={cn(
+                    'border-b border-border/50 transition-colors hover:bg-accent/50',
+                    rowChanges && 'bg-primary/5'
+                  )}>
+                    <td className="px-3 py-2 text-[10px] text-muted-foreground">
+                      {dataBrowserPage * dataBrowserPageSize + idx + 1}
                     </td>
-                  ))}
-                </tr>
-              ))}
+                    {dataBrowserResult.columns.map((col) => {
+                      const isEditing = editingCell?.rowIdx === idx && editingCell?.col === col.name
+                      const hasPendingChange = rowChanges && col.name in rowChanges
+                      const displayValue = hasPendingChange ? rowChanges[col.name] : row[col.name]
+
+                      return (
+                        <td
+                          key={col.name}
+                          onDoubleClick={() => handleCellDoubleClick(idx, col.name, displayValue)}
+                          className={cn(
+                            'px-4 py-2 font-mono text-xs',
+                            dataBrowserEditing && canEdit && 'cursor-pointer',
+                            hasPendingChange && 'border-l-2 border-l-primary'
+                          )}
+                        >
+                          {isEditing ? (
+                            <div className="flex items-center gap-1">
+                              <input
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleCellSave(row)
+                                  if (e.key === 'Escape') setEditingCell(null)
+                                }}
+                                autoFocus
+                                className="h-6 w-full min-w-[60px] rounded bg-accent/30 px-1.5 font-mono text-xs outline-none focus:ring-1 focus:ring-primary/50"
+                              />
+                              <button onClick={() => handleCellSave(row)} className="text-primary hover:text-primary/80">
+                                <Check className="h-3 w-3" />
+                              </button>
+                              <button onClick={() => setEditingCell(null)} className="text-muted-foreground hover:text-foreground">
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <CellValue value={displayValue} />
+                          )}
+                        </td>
+                      )
+                    })}
+                    {dataBrowserEditing && (
+                      <td className="px-2 py-2">
+                        {deleteConfirm === idx ? (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleDeleteRow(row)}
+                              className="text-destructive hover:text-destructive/80 text-[10px] font-medium"
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              onClick={() => setDeleteConfirm(null)}
+                              className="text-muted-foreground hover:text-foreground"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setDeleteConfirm(idx)}
+                            className="text-muted-foreground hover:text-destructive transition-colors"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         ) : (
@@ -197,6 +367,15 @@ export function DataBrowser({ connection }: { connection: DbConnectionEntry }) {
           </button>
         </div>
       </div>
+
+      {/* Insert dialog */}
+      {showInsertDialog && tableInfo && (
+        <InsertRowDialog
+          columns={tableInfo.columns}
+          onInsert={(row) => insertNewRow(connection, row)}
+          onClose={() => setShowInsertDialog(false)}
+        />
+      )}
     </div>
   )
 }

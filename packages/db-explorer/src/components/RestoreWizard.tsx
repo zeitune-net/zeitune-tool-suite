@@ -8,9 +8,24 @@ import { Badge } from '@shared/components/ui/badge'
 import { toast } from '@shared/components/ui/toast'
 import { cn } from '@shared/lib/utils'
 import { useDbExplorerStore } from '../store'
-import type { SnapshotData, RestoreConflictStrategy, DbConnectionEntry } from '@shared/types'
+import { StepSchemaDiff } from './StepSchemaDiff'
+import { StepTransformEditor } from './StepTransformEditor'
+import type {
+  SnapshotData, RestoreConflictStrategy, DbConnectionEntry,
+  TransformPipeline, SchemaDiffResult, TableTransform, ColumnMapping
+} from '@shared/types'
 
-type WizardStep = 'select' | 'options' | 'execute'
+type WizardStep = 'select' | 'schema-diff' | 'transform' | 'options' | 'execute'
+
+const STEP_LABELS: Record<WizardStep, string> = {
+  'select': 'Cible',
+  'schema-diff': 'Schema',
+  'transform': 'Transformations',
+  'options': 'Options',
+  'execute': 'Exécution'
+}
+
+const STEPS: WizardStep[] = ['select', 'schema-diff', 'transform', 'options', 'execute']
 
 export function RestoreWizard({ snapshotId, onClose }: {
   snapshotId: string
@@ -18,7 +33,9 @@ export function RestoreWizard({ snapshotId, onClose }: {
 }) {
   const {
     profiles, activeProfileId, getSnapshot,
-    executeRestore, restoreRunning, restoreProgress, connectionStates
+    executeRestore, restoreRunning, restoreProgress, connectionStates,
+    computeSchemaDiff, schemaDiff, schemaDiffLoading,
+    currentPipeline, setCurrentPipeline
   } = useDbExplorerStore()
 
   const [step, setStep] = useState<WizardStep>('select')
@@ -29,8 +46,6 @@ export function RestoreWizard({ snapshotId, onClose }: {
   const [targetConnectionId, setTargetConnectionId] = useState<string | null>(null)
   const [conflictStrategy, setConflictStrategy] = useState<RestoreConflictStrategy>('upsert')
   const [resetSequences, setResetSequences] = useState(true)
-  const [selectedTables, setSelectedTables] = useState<{ schema: string; table: string }[]>([])
-  const [selectAllTables, setSelectAllTables] = useState(true)
 
   // Load snapshot
   useEffect(() => {
@@ -38,9 +53,6 @@ export function RestoreWizard({ snapshotId, onClose }: {
       setLoading(true)
       const data = await getSnapshot(snapshotId)
       setSnapshotData(data)
-      if (data) {
-        setSelectedTables(data.tables.map((t) => ({ schema: t.schema, table: t.table })))
-      }
       setLoading(false)
     })()
   }, [snapshotId, getSnapshot])
@@ -52,43 +64,123 @@ export function RestoreWizard({ snapshotId, onClose }: {
   )
   const targetConnection = allConnections.find((c) => c.id === targetConnectionId) ?? null
 
-  const toggleTable = (schema: string, table: string) => {
-    setSelectedTables((prev) => {
-      const exists = prev.some((t) => t.schema === schema && t.table === table)
-      if (exists) {
-        setSelectAllTables(false)
-        return prev.filter((t) => !(t.schema === schema && t.table === table))
-      }
-      const next = [...prev, { schema, table }]
-      if (snapshotData && next.length === snapshotData.tables.length) setSelectAllTables(true)
-      return next
-    })
+  // Generate initial pipeline from schema diff
+  const generatePipelineFromDiff = (diffResult: SchemaDiffResult): TransformPipeline => {
+    const tableTransforms: TableTransform[] = diffResult.tables
+      .filter((t) => t.status !== 'added') // skip live-only tables
+      .map((t) => {
+        const mappings: ColumnMapping[] = []
+        const defaultValues: Record<string, string> = {}
+
+        for (const col of t.columns) {
+          if (col.status === 'identical' && col.snapshotColumn && col.liveColumn) {
+            mappings.push({ sourceColumn: col.snapshotColumn.name, targetColumn: col.liveColumn.name })
+          } else if (col.status === 'renamed' && col.snapshotColumn && col.liveColumn) {
+            mappings.push({ sourceColumn: col.snapshotColumn.name, targetColumn: col.liveColumn.name })
+          } else if (col.status === 'type-changed' && col.snapshotColumn && col.liveColumn) {
+            if (col.autoConvertible) {
+              mappings.push({ sourceColumn: col.snapshotColumn.name, targetColumn: col.liveColumn.name })
+            } else {
+              mappings.push({
+                sourceColumn: col.snapshotColumn.name,
+                targetColumn: col.liveColumn.name,
+                expression: `$source::${col.liveColumn.type}`
+              })
+            }
+          } else if (col.status === 'added' && col.liveColumn) {
+            if (col.liveColumn.defaultValue) {
+              defaultValues[col.liveColumn.name] = col.liveColumn.defaultValue
+            } else if (col.liveColumn.nullable) {
+              defaultValues[col.liveColumn.name] = 'NULL'
+            }
+            // If not nullable and no default → user must provide value in transform editor
+          }
+          // 'removed' columns → not mapped (ignored)
+        }
+
+        return {
+          sourceSchema: t.snapshotSchema,
+          sourceTable: t.snapshotTable,
+          targetSchema: t.liveSchema ?? t.snapshotSchema,
+          targetTable: t.liveTable ?? t.snapshotTable,
+          columnMappings: mappings,
+          defaultValues,
+          skip: t.status === 'removed'
+        }
+      })
+
+    return {
+      id: `pipeline-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      name: 'Pipeline auto-généré',
+      profileId: activeProfileId ?? '',
+      sourceSnapshotId: snapshotId,
+      tableTransforms,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    }
   }
 
-  const toggleAll = () => {
-    if (selectAllTables) {
-      setSelectedTables([])
-      setSelectAllTables(false)
-    } else {
-      setSelectedTables(snapshotData?.tables.map((t) => ({ schema: t.schema, table: t.table })) ?? [])
-      setSelectAllTables(true)
+  const handleGoToSchemaDiff = async () => {
+    if (!snapshotData || !targetConnection) return
+    setStep('schema-diff')
+    const result = await computeSchemaDiff(snapshotData, targetConnection)
+    if (result) {
+      setCurrentPipeline(generatePipelineFromDiff(result))
     }
+  }
+
+  const handleLoadPipeline = (pipeline: TransformPipeline) => {
+    setCurrentPipeline(pipeline)
   }
 
   const handleRestore = async () => {
     if (!targetConnection || !snapshotData) return
     setStep('execute')
+
+    // Determine selected tables from pipeline (non-skipped tables)
+    const selectedTables = currentPipeline
+      ? currentPipeline.tableTransforms
+          .filter((t) => !t.skip)
+          .map((t) => ({ schema: t.sourceSchema, table: t.sourceTable }))
+      : undefined
+
     const success = await executeRestore({
       snapshotId,
       targetConnection,
       conflictStrategy,
-      selectedTables: selectAllTables ? undefined : selectedTables,
-      resetSequences
+      selectedTables,
+      resetSequences,
+      pipeline: currentPipeline
     })
     if (success) {
       toast.success(`Restore terminé — ${restoreProgress?.rowsInserted ?? 0} rows insérées`)
     } else {
       toast.error(`Erreur restore : ${restoreProgress?.error ?? 'Erreur inconnue'}`)
+    }
+  }
+
+  const stepIndex = STEPS.indexOf(step)
+
+  const canGoNext = () => {
+    if (step === 'select') return !!targetConnectionId
+    if (step === 'schema-diff') return !!schemaDiff && !schemaDiffLoading
+    if (step === 'transform') return !!currentPipeline
+    if (step === 'options') return true
+    return false
+  }
+
+  const handleNext = () => {
+    if (step === 'select') handleGoToSchemaDiff()
+    else if (step === 'schema-diff') setStep('transform')
+    else if (step === 'transform') setStep('options')
+    else if (step === 'options') handleRestore()
+  }
+
+  const handleBack = () => {
+    if (stepIndex > 0 && step !== 'execute') {
+      setStep(STEPS[stepIndex - 1])
+    } else {
+      onClose()
     }
   }
 
@@ -127,10 +219,9 @@ export function RestoreWizard({ snapshotId, onClose }: {
 
       {/* Steps indicator */}
       <div className="flex items-center gap-2 border-b border-border px-4 py-2">
-        {(['select', 'options', 'execute'] as WizardStep[]).map((s, i) => {
-          const labels = ['Cible', 'Options', 'Exécution']
+        {STEPS.map((s, i) => {
           const isCurrent = step === s
-          const isDone = (step === 'options' && i === 0) || (step === 'execute' && i < 2)
+          const isDone = stepIndex > i
           return (
             <div key={s} className="flex items-center gap-2">
               {i > 0 && <ArrowRight className="h-3 w-3 text-muted-foreground/40" />}
@@ -138,7 +229,7 @@ export function RestoreWizard({ snapshotId, onClose }: {
                 'text-xs font-medium',
                 isCurrent ? 'text-primary' : isDone ? 'text-foreground' : 'text-muted-foreground'
               )}>
-                {labels[i]}
+                {STEP_LABELS[s]}
               </span>
             </div>
           )
@@ -157,17 +248,25 @@ export function RestoreWizard({ snapshotId, onClose }: {
             snapshotData={snapshotData}
           />
         )}
+        {step === 'schema-diff' && (
+          <StepSchemaDiff
+            diff={schemaDiff}
+            loading={schemaDiffLoading}
+            onLoadPipeline={handleLoadPipeline}
+          />
+        )}
+        {step === 'transform' && currentPipeline && schemaDiff && (
+          <StepTransformEditor
+            pipeline={currentPipeline}
+            schemaDiff={schemaDiff}
+          />
+        )}
         {step === 'options' && (
           <StepOptions
-            snapshotData={snapshotData}
             conflictStrategy={conflictStrategy}
             setConflictStrategy={setConflictStrategy}
             resetSequences={resetSequences}
             setResetSequences={setResetSequences}
-            selectedTables={selectedTables}
-            selectAllTables={selectAllTables}
-            toggleTable={toggleTable}
-            toggleAll={toggleAll}
           />
         )}
         {step === 'execute' && (
@@ -183,32 +282,28 @@ export function RestoreWizard({ snapshotId, onClose }: {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => {
-            if (step === 'options') setStep('select')
-            else onClose()
-          }}
+          onClick={handleBack}
           disabled={restoreRunning}
         >
-          {step === 'select' ? 'Annuler' : 'Précédent'}
+          {stepIndex === 0 ? 'Annuler' : 'Précédent'}
         </Button>
-        {step === 'select' && (
+        {step !== 'execute' && (
           <Button
             size="sm"
-            onClick={() => setStep('options')}
-            disabled={!targetConnectionId}
+            onClick={handleNext}
+            disabled={!canGoNext()}
           >
-            Suivant
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Button>
-        )}
-        {step === 'options' && (
-          <Button
-            size="sm"
-            onClick={handleRestore}
-            disabled={selectedTables.length === 0}
-          >
-            <Download className="h-3.5 w-3.5" />
-            Restaurer
+            {step === 'options' ? (
+              <>
+                <Download className="h-3.5 w-3.5" />
+                Restaurer
+              </>
+            ) : (
+              <>
+                Suivant
+                <ArrowRight className="h-3.5 w-3.5" />
+              </>
+            )}
           </Button>
         )}
         {step === 'execute' && !restoreRunning && (
@@ -298,16 +393,11 @@ function StepSelect({ connections, connectedConnections, targetConnectionId, onS
 
 // ── Step: Options ──────────────────────────────────────────────────────────
 
-function StepOptions({ snapshotData, conflictStrategy, setConflictStrategy, resetSequences, setResetSequences, selectedTables, selectAllTables, toggleTable, toggleAll }: {
-  snapshotData: SnapshotData
+function StepOptions({ conflictStrategy, setConflictStrategy, resetSequences, setResetSequences }: {
   conflictStrategy: RestoreConflictStrategy
   setConflictStrategy: (s: RestoreConflictStrategy) => void
   resetSequences: boolean
   setResetSequences: (v: boolean) => void
-  selectedTables: { schema: string; table: string }[]
-  selectAllTables: boolean
-  toggleTable: (schema: string, table: string) => void
-  toggleAll: () => void
 }) {
   const strategies: { value: RestoreConflictStrategy; label: string; desc: string }[] = [
     { value: 'upsert', label: 'Upsert', desc: 'INSERT ou UPDATE si la PK existe déjà' },
@@ -361,41 +451,6 @@ function StepOptions({ snapshotData, conflictStrategy, setConflictStrategy, rese
           <p className="text-[11px] text-muted-foreground">Remet les séquences au MAX(id) + 1 après import</p>
         </div>
       </label>
-
-      {/* Table selection */}
-      <div>
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">Tables à restaurer</h3>
-          <button onClick={toggleAll} className="text-[11px] text-primary hover:underline">
-            {selectAllTables ? 'Tout désélectionner' : 'Tout sélectionner'}
-          </button>
-        </div>
-        <div className="mt-2 max-h-48 space-y-0.5 overflow-y-auto rounded-lg border border-border bg-card/50 p-2">
-          {snapshotData.tables.map((t) => {
-            const checked = selectedTables.some((s) => s.schema === t.schema && s.table === t.table)
-            return (
-              <label
-                key={`${t.schema}.${t.table}`}
-                className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-muted/40"
-              >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => toggleTable(t.schema, t.table)}
-                  className="accent-primary"
-                />
-                <Table2 className="h-3 w-3 text-muted-foreground" />
-                <span className="text-muted-foreground">{t.schema}.</span>
-                <span className="font-medium">{t.table}</span>
-                <Badge variant="muted" className="ml-auto">{t.rowCount} rows</Badge>
-              </label>
-            )
-          })}
-        </div>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          {selectedTables.length} / {snapshotData.tables.length} tables sélectionnées
-        </p>
-      </div>
     </div>
   )
 }

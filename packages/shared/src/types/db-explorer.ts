@@ -1,6 +1,6 @@
 // ── Database Types ──────────────────────────────────────────────────────────
 
-export type DbType = 'postgresql'
+export type DbType = 'postgresql' | 'mysql' | 'sqlite'
 
 export type ConnectionStatus = 'connected' | 'disconnected' | 'testing' | 'error'
 
@@ -180,6 +180,7 @@ export interface RestoreOptions {
   conflictStrategy: RestoreConflictStrategy
   selectedTables?: { schema: string; table: string }[]
   resetSequences: boolean
+  pipeline?: TransformPipeline | null
 }
 
 export interface RestoreProgress {
@@ -189,4 +190,139 @@ export interface RestoreProgress {
   tablesDone: number
   rowsInserted: number
   error?: string
+}
+
+// ── Schema Diff ──────────────────────────────────────────────────────────
+
+export type ColumnDiffStatus = 'identical' | 'added' | 'removed' | 'renamed' | 'type-changed'
+
+export interface ColumnDiff {
+  status: ColumnDiffStatus
+  snapshotColumn: ColumnInfo | null
+  liveColumn: ColumnInfo | null
+  confidence?: number
+  autoConvertible?: boolean
+}
+
+export type TableDiffStatus = 'identical' | 'modified' | 'removed' | 'added'
+
+export interface TableDiff {
+  snapshotTable: string
+  snapshotSchema: string
+  liveTable: string | null
+  liveSchema: string | null
+  status: TableDiffStatus
+  columns: ColumnDiff[]
+  warnings: string[]
+}
+
+export interface SchemaDiffResult {
+  tables: TableDiff[]
+  summary: { identical: number; modified: number; removed: number; added: number }
+}
+
+// ── Transform Pipeline ───────────────────────────────────────────────────
+
+export interface ColumnMapping {
+  sourceColumn: string
+  targetColumn: string
+  expression?: string
+}
+
+export interface TableTransform {
+  sourceSchema: string
+  sourceTable: string
+  targetSchema: string
+  targetTable: string
+  columnMappings: ColumnMapping[]
+  defaultValues: Record<string, string>
+  rowFilter?: string
+  skip: boolean
+}
+
+export interface TransformPipeline {
+  id: string
+  name: string
+  description?: string
+  profileId: string
+  sourceSnapshotId?: string
+  tableTransforms: TableTransform[]
+  createdAt: number
+  updatedAt: number
+}
+
+// ── Data Sets ────────────────────────────────────────────────────────────
+
+export interface DataSet {
+  id: string
+  name: string
+  description?: string
+  profileId: string
+  snapshotId: string
+  pipelineId?: string
+  targetConnectionId?: string
+  conflictStrategy: RestoreConflictStrategy
+  resetSequences: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface DataSetStatus {
+  snapshotExists: boolean
+  pipelineExists: boolean
+  schemaCompatible: boolean | null
+  warnings: string[]
+}
+
+// ── Saved Queries ──────────────────────────────────────────────────────
+
+export interface SavedQuery {
+  id: string
+  name: string
+  sql: string
+  profileId: string
+  connectionId?: string
+  createdAt: number
+  updatedAt: number
+}
+
+// ── Row Mutations ──────────────────────────────────────────────────────
+
+export interface RowMutationResult {
+  success: boolean
+  error?: string
+  affectedRows?: number
+}
+
+// ── Monitoring ─────────────────────────────────────────────────────────
+
+export interface TableSizeInfo {
+  schema: string
+  table: string
+  totalSize: string
+  totalSizeBytes: number
+  rowEstimate: number
+}
+
+export interface ActiveConnectionInfo {
+  pid: number
+  database: string
+  username: string
+  state: string
+  query: string
+  duration: string
+  clientAddr: string
+}
+
+export interface PoolStats {
+  total: number
+  idle: number
+  waiting: number
+}
+
+export interface MonitorStats {
+  tableSizes: TableSizeInfo[]
+  activeConnections: ActiveConnectionInfo[]
+  poolStats: PoolStats
+  serverVersion: string
 }

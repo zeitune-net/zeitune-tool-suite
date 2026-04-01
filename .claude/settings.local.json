@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/PC/.claude/plugins/marketplaces/aiblueprint/claude-code-config/skills/meta-skill-creator/**)",
+      "Bash(bun scripts/validate.ts ~/.claude/skills/audit-claude-config/audit-claude-config)",
+      "Bash(bun scripts/package-skill.ts ~/.claude/skills/audit-claude-config/audit-claude-config)",
+      "Read(//c/Users/PC/.claude/skills/audit-claude-config/**)",
+      "Bash(powershell -Command \"Compress-Archive -Path 'audit-claude-config/*' -DestinationPath 'audit-claude-config.zip' -Force\")",
+      "Bash(mv audit-claude-config.zip audit-claude-config.skill)"
+    ]
+  }
+}

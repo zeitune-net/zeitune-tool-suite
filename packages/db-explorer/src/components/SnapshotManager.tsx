@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   Camera, Trash2, Download, Eye, ChevronRight, Database,
-  Loader2, Table2, ArrowLeft, Search, Plus
+  Loader2, Table2, ArrowLeft, Search, Plus, Package
 } from 'lucide-react'
 import { Button } from '@shared/components/ui/button'
 import { Badge } from '@shared/components/ui/badge'
@@ -11,6 +11,9 @@ import { cn } from '@shared/lib/utils'
 import { useDbExplorerStore } from '../store'
 import type { SnapshotMetadata, SnapshotData, DbConnectionEntry } from '@shared/types'
 import { RestoreWizard } from './RestoreWizard'
+import { DataSetManager } from './DataSetManager'
+
+type SnapshotTab = 'snapshots' | 'datasets'
 
 export function SnapshotManager() {
   const {
@@ -22,6 +25,7 @@ export function SnapshotManager() {
 
   const { confirm, dialog } = useConfirm()
 
+  const [activeTab, setActiveTab] = useState<SnapshotTab>('snapshots')
   const [inspecting, setInspecting] = useState<SnapshotData | null>(null)
   const [inspectLoading, setInspectLoading] = useState(false)
   const [filter, setFilter] = useState('')
@@ -92,71 +96,104 @@ export function SnapshotManager() {
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <Camera className="h-4 w-4 text-primary" />
-          <span className="text-sm font-semibold">Snapshots</span>
+          {/* Tab toggle */}
+          <div className="flex items-center gap-0.5 rounded-lg bg-accent/20 p-0.5">
+            <button
+              onClick={() => setActiveTab('snapshots')}
+              className={cn(
+                'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+                activeTab === 'snapshots'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <Camera className="h-3 w-3" />
+              Snapshots
+            </button>
+            <button
+              onClick={() => setActiveTab('datasets')}
+              className={cn(
+                'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+                activeTab === 'datasets'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <Package className="h-3 w-3" />
+              Data Sets
+            </button>
+          </div>
           <Badge variant="secondary">{snapshots.length}</Badge>
         </div>
-        <Button
-          size="sm"
-          onClick={() => setShowCreateForm(true)}
-          disabled={!activeConnection || snapshotCreating}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Nouveau snapshot
-        </Button>
-      </div>
-
-      {/* Create form */}
-      {showCreateForm && activeConnection && profile && (
-        <CreateSnapshotForm
-          connection={activeConnection}
-          profile={profile}
-          creating={snapshotCreating}
-          progress={snapshotProgress}
-          onClose={() => setShowCreateForm(false)}
-        />
-      )}
-
-      {/* Filter */}
-      <div className="border-b border-border px-4 py-2">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filtrer les snapshots..."
-            className="w-full rounded-md border border-border bg-muted/30 py-1.5 pl-8 pr-3 text-xs outline-none focus:border-primary/40"
-          />
-        </div>
-      </div>
-
-      {/* List */}
-      <div className="flex-1 overflow-y-auto p-4">
-        {!snapshotsLoaded ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          </div>
-        ) : filteredSnapshots.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-            <Camera className="mb-3 h-8 w-8 opacity-30" />
-            <p className="text-sm">{filter ? 'Aucun snapshot trouvé' : 'Aucun snapshot'}</p>
-            <p className="mt-1 text-xs">Créez un snapshot pour sauvegarder l'état de vos données</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {filteredSnapshots.map((snap) => (
-              <SnapshotCard
-                key={snap.id}
-                snapshot={snap}
-                onInspect={() => handleInspect(snap)}
-                onDelete={() => handleDelete(snap)}
-                onRestore={() => setRestoreSnapshotId(snap.id)}
-                inspectLoading={inspectLoading}
-              />
-            ))}
-          </div>
+        {activeTab === 'snapshots' && (
+          <Button
+            size="sm"
+            onClick={() => setShowCreateForm(true)}
+            disabled={!activeConnection || snapshotCreating}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Nouveau snapshot
+          </Button>
         )}
       </div>
+
+      {activeTab === 'datasets' ? (
+        <DataSetManager />
+      ) : (
+        <>
+          {/* Create form */}
+          {showCreateForm && activeConnection && profile && (
+            <CreateSnapshotForm
+              connection={activeConnection}
+              profile={profile}
+              creating={snapshotCreating}
+              progress={snapshotProgress}
+              onClose={() => setShowCreateForm(false)}
+            />
+          )}
+
+          {/* Filter */}
+          <div className="border-b border-border px-4 py-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filtrer les snapshots..."
+                className="w-full rounded-md border border-border bg-muted/30 py-1.5 pl-8 pr-3 text-xs outline-none focus:border-primary/40"
+              />
+            </div>
+          </div>
+
+          {/* List */}
+          <div className="flex-1 overflow-y-auto p-4">
+            {!snapshotsLoaded ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : filteredSnapshots.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                <Camera className="mb-3 h-8 w-8 opacity-30" />
+                <p className="text-sm">{filter ? 'Aucun snapshot trouvé' : 'Aucun snapshot'}</p>
+                <p className="mt-1 text-xs">Créez un snapshot pour sauvegarder l'état de vos données</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {filteredSnapshots.map((snap) => (
+                  <SnapshotCard
+                    key={snap.id}
+                    snapshot={snap}
+                    onInspect={() => handleInspect(snap)}
+                    onDelete={() => handleDelete(snap)}
+                    onRestore={() => setRestoreSnapshotId(snap.id)}
+                    inspectLoading={inspectLoading}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   )
 }
