@@ -31,6 +31,11 @@ function stmtToResult(stmt: Database.Statement, params?: unknown[]): DriverQuery
   }
 }
 
+// Escape single quotes for PRAGMA arguments
+function escapeSqliteId(name: string): string {
+  return name.replace(/'/g, "''")
+}
+
 export const sqliteDriver: DbDriver = {
   async getSchemas(_db: Database.Database): Promise<string[]> {
     return ['main']
@@ -49,7 +54,7 @@ export const sqliteDriver: DbDriver = {
   },
 
   async getColumns(db: Database.Database, _schema: string, table: string): Promise<ColumnInfo[]> {
-    const rows = db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{
+    const rows = db.prepare(`PRAGMA table_info('${escapeSqliteId(table)}')`).all() as Array<{
       cid: number; name: string; type: string; notnull: number; dflt_value: string | null; pk: number
     }>
     return rows.map((r) => ({
@@ -63,7 +68,7 @@ export const sqliteDriver: DbDriver = {
   },
 
   async getForeignKeys(db: Database.Database, _schema: string, table: string): Promise<ForeignKeyInfo[]> {
-    const rows = db.prepare(`PRAGMA foreign_key_list('${table}')`).all() as Array<{
+    const rows = db.prepare(`PRAGMA foreign_key_list('${escapeSqliteId(table)}')`).all() as Array<{
       id: number; seq: number; table: string; from: string; to: string
     }>
     return rows.map((r) => ({
@@ -76,16 +81,16 @@ export const sqliteDriver: DbDriver = {
   },
 
   async getIndexes(db: Database.Database, _schema: string, table: string): Promise<IndexInfo[]> {
-    const indexList = db.prepare(`PRAGMA index_list('${table}')`).all() as Array<{
+    const indexList = db.prepare(`PRAGMA index_list('${escapeSqliteId(table)}')`).all() as Array<{
       seq: number; name: string; unique: number; origin: string
     }>
     return indexList.map((idx) => {
-      const infos = db.prepare(`PRAGMA index_info('${idx.name}')`).all() as Array<{
-        seqno: number; cid: number; name: string
+      const infos = db.prepare(`PRAGMA index_info('${escapeSqliteId(idx.name)}')`).all() as Array<{
+        seqno: number; cid: number; name: string | null
       }>
       return {
         name: idx.name,
-        columns: infos.map((i) => i.name),
+        columns: infos.map((i) => i.name ?? `col_${i.cid}`).filter(Boolean),
         unique: idx.unique === 1,
         type: 'btree'
       }

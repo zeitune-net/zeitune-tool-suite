@@ -68,7 +68,7 @@ export function TableDetails({ connection }: { connection: DbConnectionEntry }) 
               <span className="ml-1 opacity-50">{details.foreignKeys.length}</span>
             )}
             {tab.id === 'indexes' && (
-              <span className="ml-1 opacity-50">{details.indexes.length}</span>
+              <span className="ml-1 opacity-50">{details.indexes?.length ?? 0}</span>
             )}
           </button>
         ))}
@@ -134,7 +134,7 @@ export function TableDetails({ connection }: { connection: DbConnectionEntry }) 
 
         {detailTab === 'indexes' && (
           <div className="p-4 space-y-2">
-            {details.indexes.length === 0 ? (
+            {!details.indexes?.length ? (
               <p className="text-xs text-muted-foreground text-center py-4">No indexes</p>
             ) : (
               details.indexes.map((idx) => (
@@ -147,7 +147,7 @@ export function TableDetails({ connection }: { connection: DbConnectionEntry }) 
                     )}
                   </div>
                   <p className="font-mono text-[11px] text-muted-foreground">
-                    {idx.type} ({idx.columns.join(', ')})
+                    {idx.type} ({(idx.columns ?? []).join(', ')})
                   </p>
                 </div>
               ))

@@ -313,11 +313,15 @@ export const useDbExplorerStore = create<DbExplorerStore>()((set, get) => ({
   setSelectedTable: (table) => set({ selectedTable: table }),
   tableDetails: {},
   loadTableDetails: async (conn, schema, table) => {
-    const details = await dbIpc.getTableDetails(conn, schema, table)
-    const key = `${conn.id}:${schema}.${table}`
-    set((s) => ({
-      tableDetails: { ...s.tableDetails, [key]: details }
-    }))
+    try {
+      const details = await dbIpc.getTableDetails(conn, schema, table)
+      const key = `${conn.id}:${schema}.${table}`
+      set((s) => ({
+        tableDetails: { ...s.tableDetails, [key]: details }
+      }))
+    } catch (err) {
+      console.error('Failed to load table details:', err)
+    }
   },
   detailTab: 'columns',
   setDetailTab: (tab) => set({ detailTab: tab }),

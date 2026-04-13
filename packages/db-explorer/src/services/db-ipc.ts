@@ -22,10 +22,10 @@ import type {
 } from '@shared/types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const ipc = (window as any).electron.ipcRenderer
+const getIpc = () => (window as any).electron.ipcRenderer
 
 function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
-  return ipc.invoke(channel, ...args)
+  return getIpc().invoke(channel, ...args)
 }
 
 // ── Profiles ────────────────────────────────────────────────────────────────
@@ -101,10 +101,10 @@ export const executeRestore = (options: RestoreOptions) =>
 // ── Event listeners ───────────────────────────────────────────────────────
 
 export const onSnapshotProgress = (callback: (progress: { table: string; done: number; total: number }) => void) =>
-  ipc.on('db:snapshot:progress', callback)
+  getIpc().on('db:snapshot:progress', callback)
 
 export const onRestoreProgress = (callback: (progress: Record<string, unknown>) => void) =>
-  ipc.on('db:restore:progress', callback)
+  getIpc().on('db:restore:progress', callback)
 
 // ── Schema Diff ──────────────────────────────────────────────────────────
 

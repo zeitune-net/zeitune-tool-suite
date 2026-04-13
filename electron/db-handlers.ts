@@ -422,24 +422,44 @@ export function registerDbHandlers(): void {
   })
 
   ipcMain.handle('db:table-details', async (_e, conn: DbConnectionEntry, schema: string, table: string) => {
-    const entry = getOrCreatePoolEntry(conn)
-    const { pool, driver } = entry
-    const [columns, foreignKeys, indexes, rowEstimate] = await Promise.all([
-      driver.getColumns(pool, schema, table),
-      driver.getForeignKeys(pool, schema, table),
-      driver.getIndexes(pool, schema, table),
-      driver.getRowEstimate(pool, schema, table)
-    ])
-    const primaryKey = columns.filter((c) => c.isPrimaryKey).map((c) => c.name)
-    return {
-      name: table,
-      schema,
-      type: 'table' as const,
-      columns,
-      primaryKey,
-      foreignKeys,
-      indexes,
-      rowEstimate
+    try {
+      const entry = getOrCreatePoolEntry(conn)
+      const { pool, driver } = entry
+      const [columns, foreignKeys, indexes, rowEstimate] = await Promise.allSettled([
+        driver.getColumns(pool, schema, table),
+        driver.getForeignKeys(pool, schema, table),
+        driver.getIndexes(pool, schema, table),
+        driver.getRowEstimate(pool, schema, table)
+      ]).then((results) => results.map((r) => r.status === 'fulfilled' ? r.value : []))
+
+      const cols = (columns ?? []) as Awaited<ReturnType<DbDriver['getColumns']>>
+      const fks = (foreignKeys ?? []) as Awaited<ReturnType<DbDriver['getForeignKeys']>>
+      const idxs = (indexes ?? []) as Awaited<ReturnType<DbDriver['getIndexes']>>
+      const rows = (typeof rowEstimate === 'number' ? rowEstimate : Number(rowEstimate) || 0)
+
+      const primaryKey = cols.filter((c) => c.isPrimaryKey).map((c) => c.name)
+      return {
+        name: table,
+        schema,
+        type: 'table' as const,
+        columns: cols,
+        primaryKey,
+        foreignKeys: fks,
+        indexes: idxs,
+        rowEstimate: rows
+      }
+    } catch (err) {
+      console.error('db:table-details failed:', err)
+      return {
+        name: table,
+        schema,
+        type: 'table' as const,
+        columns: [],
+        primaryKey: [],
+        foreignKeys: [],
+        indexes: [],
+        rowEstimate: 0
+      }
     }
   })
 

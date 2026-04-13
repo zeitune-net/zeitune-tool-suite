@@ -12,10 +12,10 @@ import type {
 } from '../types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const ipc = (window as any).electron.ipcRenderer
+const getIpc = () => (window as any).electron.ipcRenderer
 
 function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
-  return ipc.invoke(channel, ...args)
+  return getIpc().invoke(channel, ...args)
 }
 
 // ── Dialog ─────────────────────────────────────────────────────────────────
