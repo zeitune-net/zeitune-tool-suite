@@ -13,6 +13,7 @@ import { MonitorPanel } from './MonitorPanel'
 import { SnapshotManager } from './SnapshotManager'
 import { Camera, Activity } from 'lucide-react'
 import { cn } from '@shared/lib/utils'
+import { ErrorBoundary } from '@shared/components/ui/error-boundary'
 
 export function DbExplorerView() {
   const {
@@ -130,7 +131,9 @@ export function DbExplorerView() {
           {/* Right: Table details */}
           {selectedTable && (
             <div className="w-72 shrink-0 border-l border-border">
-              <TableDetails connection={activeConnection} />
+              <ErrorBoundary resetKey={`${activeConnection?.id}:${selectedTable}`}>
+                <TableDetails connection={activeConnection} />
+              </ErrorBoundary>
             </div>
           )}
         </div>

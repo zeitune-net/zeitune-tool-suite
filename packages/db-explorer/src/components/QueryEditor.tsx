@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { Play, Loader2, AlertCircle, History, Save, Bookmark } from 'lucide-react'
 import { Button } from '@shared/components/ui/button'
 import { SqlEditor } from './SqlEditor'
@@ -11,7 +11,7 @@ export function QueryEditor({ connection }: { connection: DbConnectionEntry }) {
     showHistory, setShowHistory,
     showSavedQueries, setShowSavedQueries,
     saveQuery, activeProfileId,
-    schemas, tableDetails, activeConnectionId
+    schemas, tableDetails, schemaColumns, loadSchemaColumns, activeConnectionId
   } = useDbExplorerStore()
   const [saveName, setSaveName] = useState('')
   const [showSaveInput, setShowSaveInput] = useState(false)
@@ -22,22 +22,37 @@ export function QueryEditor({ connection }: { connection: DbConnectionEntry }) {
     if (activeTabId) executeTabQuery(activeTabId, connection)
   }, [activeTabId, connection, executeTabQuery])
 
-  // Build schema map for auto-completion
+  // Eager-load columns for every visible schema so autocomplete works
+  // without requiring the user to click each table first.
+  useEffect(() => {
+    if (!activeConnectionId) return
+    const dbSchema = schemas[activeConnectionId]
+    if (!dbSchema) return
+    for (const s of dbSchema.schemas) {
+      loadSchemaColumns(connection, s.name).catch(() => {})
+    }
+  }, [activeConnectionId, schemas, connection, loadSchemaColumns])
+
+  // Build schema map for auto-completion. Prefer bulk-loaded columns,
+  // fall back to per-table details when available.
   const schemaMap = useMemo(() => {
     if (!activeConnectionId) return undefined
     const dbSchema = schemas[activeConnectionId]
     if (!dbSchema) return undefined
     const result: Record<string, string[]> = {}
     for (const s of dbSchema.schemas) {
+      const bulk = schemaColumns[`${activeConnectionId}:${s.name}`]
       for (const t of s.tables) {
         const key = s.name === 'public' ? t.name : `${s.name}.${t.name}`
         const detailKey = `${activeConnectionId}:${s.name}.${t.name}`
         const details = tableDetails[detailKey]
-        result[key] = details ? details.columns.map((c) => c.name) : []
+        result[key] = details
+          ? details.columns.map((c) => c.name)
+          : (bulk?.[t.name] ?? [])
       }
     }
     return result
-  }, [activeConnectionId, schemas, tableDetails])
+  }, [activeConnectionId, schemas, tableDetails, schemaColumns])
 
   const handleSaveQuery = async () => {
     if (!saveName.trim() || !activeTab?.query.trim() || !activeProfileId) return

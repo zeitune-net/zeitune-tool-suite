@@ -89,6 +89,33 @@ function connectionToStored(conn: DbConnectionEntry): StoredConnection {
   return { ...rest, encryptedPassword: encryptPassword(password) }
 }
 
+// ── IPC Sanitization ────────────────────────────────────────────────────────
+// Electron's structured clone cannot transfer BigInt across the IPC boundary.
+// mysql2 v3+ returns BIGINT/UNSIGNED columns as native BigInt, and better-sqlite3
+// returns BigInt for integers exceeding Number.MAX_SAFE_INTEGER. Without this
+// pass, opening a table containing such a column kills the renderer.
+
+function sanitizeForIpc(value: unknown): unknown {
+  if (value === null || value === undefined) return value
+  const t = typeof value
+  if (t === 'bigint') {
+    const n = value as bigint
+    if (n >= BigInt(Number.MIN_SAFE_INTEGER) && n <= BigInt(Number.MAX_SAFE_INTEGER)) {
+      return Number(n)
+    }
+    return n.toString()
+  }
+  if (t !== 'object') return value
+  if (value instanceof Date) return value
+  if (value instanceof Uint8Array || Buffer.isBuffer(value)) return value
+  if (Array.isArray(value)) return value.map(sanitizeForIpc)
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    out[k] = sanitizeForIpc(v)
+  }
+  return out
+}
+
 // ── Connection Pool Management ──────────────────────────────────────────────
 
 interface PoolEntry {
@@ -421,6 +448,46 @@ export function registerDbHandlers(): void {
     return { connectionId: conn.id, schemas }
   })
 
+  ipcMain.handle('db:bulk-columns', async (_e, conn: DbConnectionEntry, schema: string) => {
+    try {
+      const entry = getOrCreatePoolEntry(conn)
+      const { pool, driver, type } = entry
+      let sql: string
+      let params: unknown[] = []
+      if (type === 'postgresql') {
+        sql = `SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = $1 ORDER BY table_name, ordinal_position`
+        params = [schema]
+      } else if (type === 'mysql') {
+        sql = `SELECT table_name AS table_name, column_name AS column_name FROM information_schema.columns WHERE table_schema = ? ORDER BY table_name, ordinal_position`
+        params = [schema]
+      } else {
+        // SQLite — iterate tables via PRAGMA
+        const tables = await driver.getTables(pool, schema)
+        const result: Record<string, string[]> = {}
+        for (const t of tables) {
+          try {
+            const cols = await driver.getColumns(pool, schema, t.name)
+            result[t.name] = cols.map((c) => c.name)
+          } catch { /* skip */ }
+        }
+        return result
+      }
+      const res = await driver.query(pool, sql, params)
+      const result: Record<string, string[]> = {}
+      for (const row of res.rows as Record<string, unknown>[]) {
+        const t = (row.table_name ?? row.TABLE_NAME) as string
+        const c = (row.column_name ?? row.COLUMN_NAME) as string
+        if (!t || !c) continue
+        if (!result[t]) result[t] = []
+        result[t].push(c)
+      }
+      return result
+    } catch (err) {
+      console.error('db:bulk-columns failed:', err)
+      return {}
+    }
+  })
+
   ipcMain.handle('db:table-details', async (_e, conn: DbConnectionEntry, schema: string, table: string) => {
     try {
       const entry = getOrCreatePoolEntry(conn)
@@ -438,7 +505,7 @@ export function registerDbHandlers(): void {
       const rows = (typeof rowEstimate === 'number' ? rowEstimate : Number(rowEstimate) || 0)
 
       const primaryKey = cols.filter((c) => c.isPrimaryKey).map((c) => c.name)
-      return {
+      return sanitizeForIpc({
         name: table,
         schema,
         type: 'table' as const,
@@ -447,7 +514,7 @@ export function registerDbHandlers(): void {
         foreignKeys: fks,
         indexes: idxs,
         rowEstimate: rows
-      }
+      })
     } catch (err) {
       console.error('db:table-details failed:', err)
       return {
@@ -473,7 +540,7 @@ export function registerDbHandlers(): void {
       const duration = Math.round(performance.now() - start)
       return {
         columns: res.columns,
-        rows: res.rows,
+        rows: sanitizeForIpc(res.rows) as Record<string, unknown>[],
         rowCount: res.rowCount,
         duration
       }
@@ -675,7 +742,7 @@ export function registerDbHandlers(): void {
       const q = driver.quoteIdentifier.bind(driver)
       const qualifiedTable = connection.type === 'sqlite' ? q(t.name) : `${q(t.schema)}.${q(t.name)}`
       const dataRes = await driver.query(pool, `SELECT * FROM ${qualifiedTable}`)
-      const rows = dataRes.rows
+      const rows = sanitizeForIpc(dataRes.rows) as Record<string, unknown>[]
 
       snapshotTables.push({
         schema: t.schema,
@@ -1522,6 +1589,222 @@ export function registerDbHandlers(): void {
     }
   })
 
+  // ── Schema Mutations (drop constraints / indexes) ─────────────────────────
+
+  // Drop an index by name.
+  // For MySQL we need the table name (ALTER TABLE ... DROP INDEX) ;
+  // for PG / SQLite we use DROP INDEX directly with schema qualification.
+  ipcMain.handle('db:index:drop', async (_e, data: {
+    connection: DbConnectionEntry
+    schema: string
+    table: string
+    indexName: string
+  }) => {
+    try {
+      const entry = getOrCreatePoolEntry(data.connection)
+      const { pool, driver } = entry
+      const q = driver.quoteIdentifier.bind(driver)
+      let sql: string
+      if (data.connection.type === 'mysql') {
+        sql = `ALTER TABLE ${q(data.schema)}.${q(data.table)} DROP INDEX ${q(data.indexName)}`
+      } else if (data.connection.type === 'sqlite') {
+        sql = `DROP INDEX ${q(data.indexName)}`
+      } else {
+        // PostgreSQL : l'index vit dans le même schéma que la table
+        sql = `DROP INDEX ${q(data.schema)}.${q(data.indexName)}`
+      }
+      await driver.query(pool, sql)
+      return { success: true }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Drop a foreign key constraint
+  ipcMain.handle('db:fk:drop', async (_e, data: {
+    connection: DbConnectionEntry
+    schema: string
+    table: string
+    constraintName: string
+  }) => {
+    try {
+      const entry = getOrCreatePoolEntry(data.connection)
+      const { pool, driver } = entry
+      const q = driver.quoteIdentifier.bind(driver)
+      const qualified = data.connection.type === 'sqlite'
+        ? q(data.table)
+        : `${q(data.schema)}.${q(data.table)}`
+      let sql: string
+      if (data.connection.type === 'mysql') {
+        sql = `ALTER TABLE ${qualified} DROP FOREIGN KEY ${q(data.constraintName)}`
+      } else if (data.connection.type === 'sqlite') {
+        return { success: false, error: 'SQLite ne supporte pas DROP CONSTRAINT' }
+      } else {
+        sql = `ALTER TABLE ${qualified} DROP CONSTRAINT ${q(data.constraintName)}`
+      }
+      await driver.query(pool, sql)
+      return { success: true }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Drop the primary key of a table
+  ipcMain.handle('db:pk:drop', async (_e, data: {
+    connection: DbConnectionEntry
+    schema: string
+    table: string
+  }) => {
+    try {
+      const entry = getOrCreatePoolEntry(data.connection)
+      const { pool, driver } = entry
+      const q = driver.quoteIdentifier.bind(driver)
+      const qualified = data.connection.type === 'sqlite'
+        ? q(data.table)
+        : `${q(data.schema)}.${q(data.table)}`
+      if (data.connection.type === 'mysql') {
+        await driver.query(pool, `ALTER TABLE ${qualified} DROP PRIMARY KEY`)
+        return { success: true }
+      }
+      if (data.connection.type === 'sqlite') {
+        return { success: false, error: 'SQLite ne supporte pas DROP PRIMARY KEY' }
+      }
+      // PostgreSQL : récupérer le nom de la contrainte PK puis DROP
+      const lookup = await driver.query(
+        pool,
+        `SELECT tc.constraint_name
+         FROM information_schema.table_constraints tc
+         WHERE tc.constraint_type = 'PRIMARY KEY'
+           AND tc.table_schema = $1 AND tc.table_name = $2
+         LIMIT 1`,
+        [data.schema, data.table]
+      )
+      const name = (lookup.rows[0] as { constraint_name?: string } | undefined)?.constraint_name
+      if (!name) return { success: false, error: 'Aucune clé primaire trouvée' }
+      await driver.query(pool, `ALTER TABLE ${qualified} DROP CONSTRAINT ${q(name)}`)
+      return { success: true }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // ── Schema Mutations (create constraints / indexes) ────────────────────
+
+  // Create an index
+  ipcMain.handle('db:index:create', async (_e, data: {
+    connection: DbConnectionEntry
+    schema: string
+    table: string
+    name?: string
+    columns: string[]
+    unique: boolean
+    method?: string // PG: btree/hash/gin/gist/...
+  }) => {
+    try {
+      if (!Array.isArray(data.columns) || data.columns.length === 0) {
+        return { success: false, error: 'Au moins une colonne requise' }
+      }
+      const entry = getOrCreatePoolEntry(data.connection)
+      const { pool, driver } = entry
+      const q = driver.quoteIdentifier.bind(driver)
+      const colList = data.columns.map(q).join(', ')
+      const uniqueKw = data.unique ? 'UNIQUE ' : ''
+      const autoName = data.name?.trim()
+        ? data.name.trim()
+        : `${data.table}_${data.columns.join('_')}_${data.unique ? 'uq' : 'idx'}`
+      let sql: string
+      if (data.connection.type === 'mysql') {
+        sql = `CREATE ${uniqueKw}INDEX ${q(autoName)} ON ${q(data.schema)}.${q(data.table)} (${colList})`
+      } else if (data.connection.type === 'sqlite') {
+        sql = `CREATE ${uniqueKw}INDEX ${q(autoName)} ON ${q(data.table)} (${colList})`
+      } else {
+        // PostgreSQL : méthode d'index optionnelle
+        const using = data.method && data.method.trim() ? ` USING ${data.method.trim()}` : ''
+        sql = `CREATE ${uniqueKw}INDEX ${q(autoName)} ON ${q(data.schema)}.${q(data.table)}${using} (${colList})`
+      }
+      await driver.query(pool, sql)
+      return { success: true }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Create a foreign key
+  ipcMain.handle('db:fk:create', async (_e, data: {
+    connection: DbConnectionEntry
+    schema: string
+    table: string
+    name?: string
+    column: string
+    referencedSchema: string
+    referencedTable: string
+    referencedColumn: string
+    onDelete?: 'NO ACTION' | 'CASCADE' | 'SET NULL' | 'SET DEFAULT' | 'RESTRICT'
+    onUpdate?: 'NO ACTION' | 'CASCADE' | 'SET NULL' | 'SET DEFAULT' | 'RESTRICT'
+  }) => {
+    try {
+      if (data.connection.type === 'sqlite') {
+        return { success: false, error: 'SQLite ne supporte pas ADD CONSTRAINT via ALTER TABLE' }
+      }
+      if (!data.column || !data.referencedTable || !data.referencedColumn) {
+        return { success: false, error: 'Colonnes source et cible requises' }
+      }
+      const entry = getOrCreatePoolEntry(data.connection)
+      const { pool, driver } = entry
+      const q = driver.quoteIdentifier.bind(driver)
+      const qualified = `${q(data.schema)}.${q(data.table)}`
+      const refQualified = data.referencedSchema
+        ? `${q(data.referencedSchema)}.${q(data.referencedTable)}`
+        : q(data.referencedTable)
+      const autoName = data.name?.trim()
+        ? data.name.trim()
+        : `${data.table}_${data.column}_fkey`
+      const onDelete = data.onDelete ? ` ON DELETE ${data.onDelete}` : ''
+      const onUpdate = data.onUpdate ? ` ON UPDATE ${data.onUpdate}` : ''
+      const sql = `ALTER TABLE ${qualified} ADD CONSTRAINT ${q(autoName)} FOREIGN KEY (${q(data.column)}) REFERENCES ${refQualified} (${q(data.referencedColumn)})${onDelete}${onUpdate}`
+      await driver.query(pool, sql)
+      return { success: true }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // Create a primary key
+  ipcMain.handle('db:pk:create', async (_e, data: {
+    connection: DbConnectionEntry
+    schema: string
+    table: string
+    name?: string
+    columns: string[]
+  }) => {
+    try {
+      if (data.connection.type === 'sqlite') {
+        return { success: false, error: 'SQLite ne supporte pas ADD PRIMARY KEY via ALTER TABLE' }
+      }
+      if (!Array.isArray(data.columns) || data.columns.length === 0) {
+        return { success: false, error: 'Au moins une colonne requise' }
+      }
+      const entry = getOrCreatePoolEntry(data.connection)
+      const { pool, driver } = entry
+      const q = driver.quoteIdentifier.bind(driver)
+      const qualified = `${q(data.schema)}.${q(data.table)}`
+      const colList = data.columns.map(q).join(', ')
+      let sql: string
+      if (data.connection.type === 'mysql') {
+        // MySQL : nom PK toujours "PRIMARY", ignoré
+        sql = `ALTER TABLE ${qualified} ADD PRIMARY KEY (${colList})`
+      } else {
+        // PostgreSQL
+        const autoName = data.name?.trim() ? data.name.trim() : `${data.table}_pkey`
+        sql = `ALTER TABLE ${qualified} ADD CONSTRAINT ${q(autoName)} PRIMARY KEY (${colList})`
+      }
+      await driver.query(pool, sql)
+      return { success: true }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
   ipcMain.handle('db:row:delete', async (_e, data: {
     connection: DbConnectionEntry
     schema: string
@@ -1573,7 +1856,7 @@ export function registerDbHandlers(): void {
       if (driver.getServerVersion) serverVersion = await driver.getServerVersion(pool)
     } catch { /* non-critical */ }
 
-    return { tableSizes, activeConnections, poolStats, serverVersion }
+    return sanitizeForIpc({ tableSizes, activeConnections, poolStats, serverVersion })
   })
 
   ipcMain.handle('db:dataset:check-status', async (_e, datasetId: string, targetConnection?: DbConnectionEntry) => {

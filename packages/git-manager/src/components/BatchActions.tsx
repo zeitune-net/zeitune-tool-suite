@@ -4,6 +4,7 @@ import {
   ArrowUpFromLine,
   RefreshCw,
   GitBranch,
+  GitMerge,
   Loader2,
   CheckCircle2,
   XCircle,
@@ -104,6 +105,7 @@ export function BatchActions() {
     batchPush,
     batchCheckout,
     batchCommit,
+    batchMerge,
     repositories
   } = useGitManagerStore()
 
@@ -113,6 +115,9 @@ export function BatchActions() {
   const [showPullInput, setShowPullInput] = useState(false)
   const [showCommitInput, setShowCommitInput] = useState(false)
   const [commitMessage, setCommitMessage] = useState('')
+  const [mergeSource, setMergeSource] = useState('')
+  const [mergeTarget, setMergeTarget] = useState('')
+  const [showMergeInput, setShowMergeInput] = useState(false)
 
   const disabled = selectedRepoPaths.length === 0 || batchLoading
 
@@ -140,6 +145,15 @@ export function BatchActions() {
       batchCheckout(checkoutBranch)
       setCheckoutBranch('')
       setShowCheckoutInput(false)
+    }
+  }
+
+  const handleMerge = () => {
+    if (mergeSource) {
+      batchMerge(mergeSource, mergeTarget || undefined)
+      setMergeSource('')
+      setMergeTarget('')
+      setShowMergeInput(false)
     }
   }
 
@@ -196,6 +210,16 @@ export function BatchActions() {
           <Send className="mr-1.5 h-3.5 w-3.5" />
           Commit
         </Button>
+
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={() => setShowMergeInput(!showMergeInput)}
+        >
+          <GitMerge className="mr-1.5 h-3.5 w-3.5" />
+          Merge
+        </Button>
       </div>
 
       {/* Pull branch input */}
@@ -231,6 +255,48 @@ export function BatchActions() {
           <Button variant="ghost" size="sm" onClick={() => setShowCheckoutInput(false)}>
             <X className="h-3 w-3" />
           </Button>
+        </div>
+      )}
+
+      {/* Bulk merge input */}
+      {showMergeInput && (
+        <div className="space-y-2 rounded-xl border border-border p-3">
+          <div className="flex items-center gap-2">
+            <span className="w-16 shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+              Source
+            </span>
+            <BranchDropdown
+              value={mergeSource}
+              onChange={setMergeSource}
+              branches={allBranches}
+              placeholder="Branche à merger (requis)"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-16 shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+              Cible
+            </span>
+            <BranchDropdown
+              value={mergeTarget}
+              onChange={setMergeTarget}
+              branches={allBranches}
+              placeholder="Branche cible (vide = courante)"
+            />
+            {mergeTarget && (
+              <Button variant="ghost" size="sm" onClick={() => setMergeTarget('')} title="Utiliser la branche courante">
+                <X className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setShowMergeInput(false)}>
+              Annuler
+            </Button>
+            <Button size="sm" disabled={!mergeSource || disabled} onClick={handleMerge}>
+              <GitMerge className="mr-1 h-3 w-3" />
+              Merge all
+            </Button>
+          </div>
         </div>
       )}
 

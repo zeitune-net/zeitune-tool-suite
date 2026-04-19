@@ -56,6 +56,16 @@ interface ManagedProcess {
   startedAt: number
   autoRestart: boolean
   config: ServiceConfig
+  retryCount: number
+  intentionalStop: boolean
+}
+
+// Max d'auto-restarts consécutifs après crash avant de marquer "stuck"
+const MAX_AUTO_RESTARTS = 5
+// Backoff base en ms: 2s, 4s, 8s, 16s, 30s (cap)
+function backoffDelayMs(retryCount: number): number {
+  const base = 2000 * Math.pow(2, Math.max(0, retryCount - 1))
+  return Math.min(base, 30_000)
 }
 
 // ── Profile Persistence ─────────────────────────────────────────────────────
@@ -127,14 +137,23 @@ function sendLog(serviceId: string, stream: 'stdout' | 'stderr' | 'system', text
 function sendStatus(
   serviceId: string,
   status: string,
-  extra?: { pid?: number; error?: string }
+  extra?: {
+    pid?: number
+    error?: string
+    exitReason?: 'normal' | 'crash' | 'killed'
+    exitCode?: number | null
+    retryCount?: number
+    stuck?: boolean
+    waitingFor?: string[]
+  }
 ): void {
   sendToRenderer('dev:service:status', { serviceId, status, ...extra })
 }
 
 async function startServiceProcess(
   profileId: string,
-  config: ServiceConfig
+  config: ServiceConfig,
+  options: { retryCount?: number } = {}
 ): Promise<void> {
   const key = processKey(profileId, config.id)
 
@@ -156,7 +175,11 @@ async function startServiceProcess(
   // Build environment
   const env = { ...process.env, ...(config.envVars || {}) }
 
-  sendStatus(config.id, 'starting')
+  const retryCount = options.retryCount ?? 0
+  sendStatus(config.id, 'starting', { retryCount, stuck: false })
+  if (retryCount > 0) {
+    sendLog(config.id, 'system', `Tentative de redemarrage #${retryCount}/${MAX_AUTO_RESTARTS}`)
+  }
   sendLog(config.id, 'system', `Demarrage: ${config.command}`)
   sendLog(config.id, 'system', `Repertoire: ${config.workingDir}`)
 
@@ -173,7 +196,9 @@ async function startServiceProcess(
     process: child,
     startedAt: Date.now(),
     autoRestart: config.autoRestart,
-    config
+    config,
+    retryCount,
+    intentionalStop: false
   }
 
   processes.set(key, managed)
@@ -216,7 +241,7 @@ async function startServiceProcess(
   child.on('error', (err) => {
     flushBuffers()
     sendLog(config.id, 'system', `Erreur: ${err.message}`)
-    sendStatus(config.id, 'error', { error: err.message })
+    sendStatus(config.id, 'error', { error: err.message, exitReason: 'crash' })
     processes.delete(key)
   })
 
@@ -225,23 +250,69 @@ async function startServiceProcess(
     if (flushTimer) clearTimeout(flushTimer)
     processes.delete(key)
 
-    const msg = signal
-      ? `Processus arrete par signal ${signal}`
-      : `Processus termine avec code ${code}`
-    sendLog(config.id, 'system', msg)
+    const wasIntentional = managed.intentionalStop
+    let exitReason: 'normal' | 'crash' | 'killed'
+    if (wasIntentional || signal) {
+      exitReason = wasIntentional ? 'killed' : 'killed'
+      sendLog(
+        config.id,
+        'system',
+        wasIntentional
+          ? 'Processus arrete volontairement'
+          : `Processus arrete par signal ${signal}`
+      )
+    } else if (code === 0 || code === null) {
+      exitReason = 'normal'
+      sendLog(config.id, 'system', `Processus termine normalement (code ${code ?? 0})`)
+    } else {
+      exitReason = 'crash'
+      sendLog(config.id, 'system', `Processus crashe (code ${code})`)
+    }
 
-    if (code !== 0 && code !== null && !signal) {
-      sendStatus(config.id, 'error', { error: `Exit code ${code}` })
-
-      // Auto-restart on error
-      if (managed.autoRestart) {
-        sendLog(config.id, 'system', 'Redemarrage automatique dans 2s...')
+    if (exitReason === 'crash') {
+      // Auto-restart borne avec backoff exponentiel
+      if (managed.autoRestart && managed.retryCount < MAX_AUTO_RESTARTS) {
+        const nextRetry = managed.retryCount + 1
+        const delay = backoffDelayMs(nextRetry)
+        sendStatus(config.id, 'error', {
+          error: `Exit code ${code}`,
+          exitReason: 'crash',
+          exitCode: code,
+          retryCount: nextRetry
+        })
+        sendLog(
+          config.id,
+          'system',
+          `Redemarrage automatique dans ${Math.round(delay / 1000)}s (${nextRetry}/${MAX_AUTO_RESTARTS})`
+        )
         setTimeout(() => {
-          startServiceProcess(profileId, config)
-        }, 2000)
+          startServiceProcess(profileId, config, { retryCount: nextRetry })
+        }, delay)
+      } else {
+        // Plus de retries — marquer stuck
+        const stuck = managed.autoRestart && managed.retryCount >= MAX_AUTO_RESTARTS
+        if (stuck) {
+          sendLog(
+            config.id,
+            'system',
+            `Bloque apres ${MAX_AUTO_RESTARTS} tentatives - redemarrez manuellement`
+          )
+        }
+        sendStatus(config.id, 'error', {
+          error: `Exit code ${code}`,
+          exitReason: 'crash',
+          exitCode: code,
+          retryCount: managed.retryCount,
+          stuck
+        })
       }
     } else {
-      sendStatus(config.id, 'stopped')
+      sendStatus(config.id, 'stopped', {
+        exitReason,
+        exitCode: code,
+        retryCount: 0,
+        stuck: false
+      })
     }
   })
 
@@ -250,7 +321,10 @@ async function startServiceProcess(
     // For docker-compose, poll container status
     pollDockerCompose(config.id, config.workingDir, config.command, key)
   } else if (config.port) {
-    pollPort(config.id, config.port, 60000, child.pid)
+    pollPort(config.id, config.port, 60000, child.pid, config.healthCheckUrl)
+  } else if (config.healthCheckUrl) {
+    // Pas de port mais health check URL
+    pollHealthUrl(config.id, config.healthCheckUrl, 60000, child.pid, key)
   } else {
     // No port to check, mark as running after a short delay
     setTimeout(() => {
@@ -267,6 +341,7 @@ async function killProcess(key: string): Promise<void> {
 
   // Prevent auto-restart during intentional stop
   managed.autoRestart = false
+  managed.intentionalStop = true
 
   const { process: child } = managed
   const pid = child.pid
@@ -396,7 +471,8 @@ function pollPort(
   serviceId: string,
   port: number,
   timeout: number,
-  pid?: number
+  pid?: number,
+  healthCheckUrl?: string
 ): void {
   const startTime = Date.now()
 
@@ -406,8 +482,29 @@ function pollPort(
 
     socket.on('connect', () => {
       socket.destroy()
-      sendStatus(serviceId, 'running', { pid })
-      sendLog(serviceId, 'system', `Port ${port} accessible - service pret`)
+      // Port ouvert — si un health check URL est configuré, le vérifier avant "running"
+      if (healthCheckUrl) {
+        sendLog(serviceId, 'system', `Port ${port} ouvert - verification health check...`)
+        checkHealthUrl(healthCheckUrl).then((healthy) => {
+          if (healthy) {
+            sendStatus(serviceId, 'running', { pid })
+            sendLog(serviceId, 'system', `Health check OK - service pret`)
+          } else if (Date.now() - startTime < timeout) {
+            setTimeout(check, 2000)
+          } else {
+            // Port ouvert mais health check jamais OK — marquer running quand meme
+            sendStatus(serviceId, 'running', { pid })
+            sendLog(
+              serviceId,
+              'system',
+              `Timeout health check - service marque running (port ${port} ouvert)`
+            )
+          }
+        })
+      } else {
+        sendStatus(serviceId, 'running', { pid })
+        sendLog(serviceId, 'system', `Port ${port} accessible - service pret`)
+      }
     })
 
     socket.on('error', () => {
@@ -430,6 +527,34 @@ function pollPort(
   }
 
   // Wait 2s before first check
+  setTimeout(check, 2000)
+}
+
+function pollHealthUrl(
+  serviceId: string,
+  url: string,
+  timeout: number,
+  pid: number | undefined,
+  procKey: string
+): void {
+  const startTime = Date.now()
+
+  const check = async () => {
+    if (!processes.has(procKey)) return
+    const healthy = await checkHealthUrl(url)
+    if (!processes.has(procKey)) return
+    if (healthy) {
+      sendStatus(serviceId, 'running', { pid })
+      sendLog(serviceId, 'system', `Health check OK - service pret`)
+    } else if (Date.now() - startTime < timeout) {
+      setTimeout(check, 2000)
+    } else {
+      // Timeout — marquer running quand meme
+      sendStatus(serviceId, 'running', { pid })
+      sendLog(serviceId, 'system', `Timeout health check - service marque running`)
+    }
+  }
+
   setTimeout(check, 2000)
 }
 
@@ -673,12 +798,32 @@ async function detectSpringPort(dirPath: string): Promise<number | undefined> {
   return undefined
 }
 
+const SCAN_TIMEOUT_MS = 60_000
+const SCAN_PROGRESS_THROTTLE_MS = 100
+
 async function scanDirectory(rootPath: string): Promise<ServiceScanResult[]> {
   const results: ServiceScanResult[] = []
+  const deadline = Date.now() + SCAN_TIMEOUT_MS
+  let scannedCount = 0
+  let lastProgressSent = 0
+
+  const emitProgress = (current: string) => {
+    const now = Date.now()
+    if (now - lastProgressSent < SCAN_PROGRESS_THROTTLE_MS) return
+    lastProgressSent = now
+    sendToRenderer('dev:scan:progress', {
+      current,
+      scanned: scannedCount,
+      found: results.length
+    })
+  }
 
   async function scanDir(dirPath: string, depth: number): Promise<void> {
     if (depth > 2) return
+    if (Date.now() > deadline) return
     try {
+      scannedCount++
+      emitProgress(dirPath)
       const detected = await detectService(dirPath)
       if (detected) {
         results.push(detected)
@@ -706,6 +851,12 @@ async function scanDirectory(rootPath: string): Promise<ServiceScanResult[]> {
   }
 
   await scanDir(rootPath, 0)
+  // Flush final
+  sendToRenderer('dev:scan:progress', {
+    current: '',
+    scanned: scannedCount,
+    found: results.length
+  })
   return results
 }
 
@@ -928,7 +1079,20 @@ export function registerDevHandlers(): void {
       const configs = profile.services.filter((s) => serviceIds.includes(s.id))
       const layers = topologicalSort(configs)
 
-      for (const layer of layers) {
+      // Marquer les services des couches 2+ comme "waiting" dès le début
+      const nameById = new Map(configs.map((c) => [c.id, c.name]))
+      for (let i = 1; i < layers.length; i++) {
+        for (const id of layers[i]) {
+          const cfg = configs.find((c) => c.id === id)
+          const waitingFor = cfg?.dependsOn
+            ?.filter((dep) => nameById.has(dep))
+            .map((dep) => nameById.get(dep)!) || []
+          sendStatus(id, 'waiting', { waitingFor })
+        }
+      }
+
+      for (let i = 0; i < layers.length; i++) {
+        const layer = layers[i]
         await Promise.all(
           layer.map((id) => {
             const config = configs.find((c) => c.id === id)
@@ -937,7 +1101,7 @@ export function registerDevHandlers(): void {
           })
         )
         // Wait a moment between layers for dependencies to start
-        if (layers.indexOf(layer) < layers.length - 1) {
+        if (i < layers.length - 1) {
           await new Promise((r) => setTimeout(r, 3000))
         }
       }
@@ -1056,7 +1220,19 @@ export function registerDevHandlers(): void {
       const configs = profile.services.filter((s) => serviceIds.includes(s.id))
       const layers = topologicalSort(configs)
 
-      for (const layer of layers) {
+      const nameById = new Map(configs.map((c) => [c.id, c.name]))
+      for (let i = 1; i < layers.length; i++) {
+        for (const id of layers[i]) {
+          const cfg = configs.find((c) => c.id === id)
+          const waitingFor = cfg?.dependsOn
+            ?.filter((dep) => nameById.has(dep))
+            .map((dep) => nameById.get(dep)!) || []
+          sendStatus(id, 'waiting', { waitingFor })
+        }
+      }
+
+      for (let i = 0; i < layers.length; i++) {
+        const layer = layers[i]
         await Promise.all(
           layer.map((id) => {
             const config = configs.find((c) => c.id === id)
@@ -1064,7 +1240,7 @@ export function registerDevHandlers(): void {
             return Promise.resolve()
           })
         )
-        if (layers.indexOf(layer) < layers.length - 1) {
+        if (i < layers.length - 1) {
           await new Promise((r) => setTimeout(r, 3000))
         }
       }

@@ -59,6 +59,9 @@ export const getSchemas = (conn: DbConnectionEntry) =>
 export const getTableDetails = (conn: DbConnectionEntry, schema: string, table: string) =>
   invoke<TableInfo>('db:table-details', conn, schema, table)
 
+export const getBulkColumns = (conn: DbConnectionEntry, schema: string) =>
+  invoke<Record<string, string[]>>('db:bulk-columns', conn, schema)
+
 // ── Query ───────────────────────────────────────────────────────────────────
 
 export const executeQuery = (conn: DbConnectionEntry, sql: string) =>
@@ -172,6 +175,55 @@ export const deleteRow = (data: {
   schema: string; table: string
   primaryKey: Record<string, unknown>
 }) => invoke<RowMutationResult>('db:row:delete', data)
+
+// ── Schema Mutations (drops only) ────────────────────────────────────────
+
+export interface DropResult { success: boolean; error?: string }
+
+export const dropIndex = (data: {
+  connection: DbConnectionEntry
+  schema: string; table: string
+  indexName: string
+}) => invoke<DropResult>('db:index:drop', data)
+
+export const dropForeignKey = (data: {
+  connection: DbConnectionEntry
+  schema: string; table: string
+  constraintName: string
+}) => invoke<DropResult>('db:fk:drop', data)
+
+export const dropPrimaryKey = (data: {
+  connection: DbConnectionEntry
+  schema: string; table: string
+}) => invoke<DropResult>('db:pk:drop', data)
+
+export const createIndex = (data: {
+  connection: DbConnectionEntry
+  schema: string; table: string
+  name?: string
+  columns: string[]
+  unique: boolean
+  method?: string
+}) => invoke<DropResult>('db:index:create', data)
+
+export const createForeignKey = (data: {
+  connection: DbConnectionEntry
+  schema: string; table: string
+  name?: string
+  column: string
+  referencedSchema: string
+  referencedTable: string
+  referencedColumn: string
+  onDelete?: string
+  onUpdate?: string
+}) => invoke<DropResult>('db:fk:create', data)
+
+export const createPrimaryKey = (data: {
+  connection: DbConnectionEntry
+  schema: string; table: string
+  name?: string
+  columns: string[]
+}) => invoke<DropResult>('db:pk:create', data)
 
 // ── Monitoring ─────────────────────────────────────────────────────────
 

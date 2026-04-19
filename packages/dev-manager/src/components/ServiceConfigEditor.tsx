@@ -1,9 +1,20 @@
-import { Plus, Trash2, FolderOpen } from 'lucide-react'
+import { useState } from 'react'
+import { Plus, Trash2, FolderOpen, Eye, EyeOff, AlertTriangle } from 'lucide-react'
 import { Button } from '@shared/components/ui/button'
 import { Badge } from '@shared/components/ui/badge'
 import { cn } from '@shared/lib/utils'
 import { openDirectoryDialog } from '../services/dev-ipc'
 import type { ServiceConfig, ServiceType } from '../types'
+
+// Clés considérées sensibles — masquées par défaut avec toggle reveal
+const SENSITIVE_KEY_PATTERNS = /(TOKEN|SECRET|PASSWORD|PASSWD|PWD|KEY|CREDENTIAL|API[_-]?KEY|PRIVATE)/i
+
+// Clés qui écrasent typiquement des variables système critiques — warning
+const SYSTEM_KEYS = new Set(['PATH', 'HOME', 'USER', 'USERNAME', 'TEMP', 'TMP', 'SHELL', 'NODE_ENV'])
+
+function isSensitiveKey(key: string): boolean {
+  return SENSITIVE_KEY_PATTERNS.test(key)
+}
 
 const typeLabels: Record<ServiceType, string> = {
   'spring-boot-maven': 'Spring Boot (Maven)',
@@ -55,6 +66,20 @@ export function ServiceConfigEditor({ config, onChange, compact }: ServiceConfig
   }
 
   const envEntries = Object.entries(config.envVars || {})
+  const [revealed, setRevealed] = useState<Set<string>>(new Set())
+
+  const toggleReveal = (key: string) => {
+    setRevealed((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const overrideWarnings = envEntries
+    .map(([k]) => k)
+    .filter((k) => SYSTEM_KEYS.has(k.toUpperCase()))
 
   const addEnvVar = () => {
     const envVars = { ...(config.envVars || {}), '': '' }
@@ -181,31 +206,59 @@ export function ServiceConfigEditor({ config, onChange, compact }: ServiceConfig
               Ajouter
             </Button>
           </div>
+          {overrideWarnings.length > 0 && (
+            <div className="mb-2 flex items-start gap-1.5 rounded-md border border-warning/30 bg-warning/5 px-2 py-1.5 text-[10px] text-warning">
+              <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+              <span>
+                Ces variables écrasent l'environnement système :{' '}
+                <span className="font-mono font-medium">{overrideWarnings.join(', ')}</span>
+              </span>
+            </div>
+          )}
           {envEntries.length > 0 && (
             <div className="space-y-1.5">
-              {envEntries.map(([key, value], i) => (
-                <div key={i} className="flex items-center gap-1.5">
-                  <input
-                    value={key}
-                    onChange={(e) => updateEnvVar(key, e.target.value, value)}
-                    placeholder="KEY"
-                    className="w-1/3 rounded border border-border bg-input px-2 py-1 text-[10px] font-mono focus:border-primary focus:outline-none"
-                  />
-                  <span className="text-muted-foreground">=</span>
-                  <input
-                    value={value}
-                    onChange={(e) => updateEnvVar(key, key, e.target.value)}
-                    placeholder="value"
-                    className="flex-1 rounded border border-border bg-input px-2 py-1 text-[10px] font-mono focus:border-primary focus:outline-none"
-                  />
-                  <button
-                    onClick={() => removeEnvVar(key)}
-                    className="rounded p-0.5 text-muted-foreground hover:text-destructive"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
-                </div>
-              ))}
+              {envEntries.map(([key, value], i) => {
+                const sensitive = isSensitiveKey(key)
+                const isRevealed = revealed.has(key)
+                const shouldMask = sensitive && !isRevealed
+                return (
+                  <div key={i} className="flex items-center gap-1.5">
+                    <input
+                      value={key}
+                      onChange={(e) => updateEnvVar(key, e.target.value, value)}
+                      placeholder="KEY"
+                      className={cn(
+                        'w-1/3 rounded border bg-input px-2 py-1 text-[10px] font-mono focus:outline-none focus:border-primary',
+                        sensitive ? 'border-warning/40' : 'border-border'
+                      )}
+                    />
+                    <span className="text-muted-foreground">=</span>
+                    <input
+                      value={value}
+                      type={shouldMask ? 'password' : 'text'}
+                      onChange={(e) => updateEnvVar(key, key, e.target.value)}
+                      placeholder="value"
+                      className="flex-1 rounded border border-border bg-input px-2 py-1 text-[10px] font-mono focus:border-primary focus:outline-none"
+                    />
+                    {sensitive && (
+                      <button
+                        type="button"
+                        onClick={() => toggleReveal(key)}
+                        className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                        title={isRevealed ? 'Masquer' : 'Afficher'}
+                      >
+                        {isRevealed ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => removeEnvVar(key)}
+                      className="rounded p-0.5 text-muted-foreground hover:text-destructive"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>

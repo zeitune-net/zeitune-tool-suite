@@ -11,7 +11,8 @@ const statusColor: Record<ServiceStatus, string> = {
   stopping: 'text-yellow-500',
   stopped: 'text-gray-500',
   error: 'text-red-500',
-  external: 'text-blue-400'
+  external: 'text-blue-400',
+  waiting: 'text-purple-400'
 }
 
 const statusDotClass: Record<ServiceStatus, string> = {
@@ -20,7 +21,8 @@ const statusDotClass: Record<ServiceStatus, string> = {
   stopping: 'fill-current text-yellow-500 animate-pulse',
   stopped: 'fill-current text-gray-500',
   error: 'fill-current text-red-500',
-  external: 'fill-current text-blue-400'
+  external: 'fill-current text-blue-400',
+  waiting: 'fill-current text-purple-400 animate-pulse'
 }
 
 interface GroupedServices {
@@ -39,9 +41,20 @@ export function ServiceList() {
     selectGroup,
     deselectGroup,
     isAllGroupSelected,
-    portStatuses
+    portStatuses,
+    refreshPortStatuses
   } = useDevManagerStore()
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  const [refreshingPorts, setRefreshingPorts] = useState(false)
+
+  const handleRefreshPorts = async () => {
+    setRefreshingPorts(true)
+    try {
+      await refreshPortStatuses()
+    } finally {
+      setRefreshingPorts(false)
+    }
+  }
 
   // Group services
   const grouped: GroupedServices = {}
@@ -64,7 +77,7 @@ export function ServiceList() {
 
   const handleAction = (e: React.MouseEvent, serviceId: string, status: ServiceStatus) => {
     e.stopPropagation()
-    if (status === 'stopping') return
+    if (status === 'stopping' || status === 'waiting') return
     if (status === 'external') {
       restartService(serviceId)
     } else if (status === 'running' || status === 'starting') {
@@ -92,6 +105,21 @@ export function ServiceList() {
 
   return (
     <div className="h-full overflow-auto">
+      {services.length > 0 && (
+        <div className="mb-1 flex items-center justify-between px-2">
+          <span className="text-[10px] text-muted-foreground">
+            {services.length} service{services.length > 1 ? 's' : ''}
+          </span>
+          <button
+            onClick={handleRefreshPorts}
+            disabled={refreshingPorts}
+            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+            title="Rafraîchir l'état des ports"
+          >
+            <RefreshCw className={cn('h-3 w-3', refreshingPorts && 'animate-spin')} />
+          </button>
+        </div>
+      )}
       {groups.map((group) => {
         const groupServices = grouped[group]
         const runningCount = groupServices.filter((s) => s.status === 'running' || s.status === 'external').length
@@ -175,6 +203,16 @@ export function ServiceList() {
                         <Circle className={cn('h-2.5 w-2.5 shrink-0', statusDotClass[svc.status])} />
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium">{svc.config.name}</p>
+                          {svc.status === 'waiting' && svc.waitingFor && svc.waitingFor.length > 0 && (
+                            <p className="truncate text-[10px] text-purple-400">
+                              attend : {svc.waitingFor.join(', ')}
+                            </p>
+                          )}
+                          {svc.stuck && (
+                            <p className="truncate text-[10px] text-red-400 font-medium">
+                              STUCK · {svc.retryCount ?? 0} retries
+                            </p>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">

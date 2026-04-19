@@ -10,7 +10,16 @@ export type ServiceType =
 
 // ── Runtime Status ──────────────────────────────────────────────────────────
 
-export type ServiceStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error' | 'external'
+export type ServiceStatus =
+  | 'stopped'
+  | 'starting'
+  | 'running'
+  | 'stopping'
+  | 'error'
+  | 'external'
+  | 'waiting' // En attente de dépendances
+
+export type ExitReason = 'normal' | 'crash' | 'killed'
 
 // ── Persisted Config ────────────────────────────────────────────────────────
 
@@ -51,6 +60,15 @@ export interface ServiceRuntime {
   startedAt?: number
   portAvailable?: boolean
   healthStatus?: 'unknown' | 'healthy' | 'unhealthy'
+  // Dernière raison d'arrêt (pour distinguer crash vs arrêt propre)
+  exitReason?: ExitReason
+  exitCode?: number | null
+  // Compteur de redémarrages automatiques consécutifs (autoRestart)
+  retryCount?: number
+  // Service bloqué (a épuisé les retries)
+  stuck?: boolean
+  // IDs des services dont celui-ci dépend encore (affichage 'waiting')
+  waitingFor?: string[]
 }
 
 export interface LogEntry {
@@ -74,6 +92,12 @@ export interface ServiceScanResult {
 export interface PortCheckResult {
   available: boolean
   pid?: number
+}
+
+export interface ScanProgress {
+  current: string
+  scanned: number
+  found: number
 }
 
 // ── Store View State ────────────────────────────────────────────────────────

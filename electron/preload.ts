@@ -6,6 +6,7 @@ const ON_CHANNELS = [
   'window:maximized-changed',
   'dev:service:log',
   'dev:service:status',
+  'dev:scan:progress',
   'db:snapshot:progress',
   'db:restore:progress'
 ]
@@ -91,6 +92,7 @@ const INVOKE_CHANNELS = [
   'db:connect',
   'db:disconnect',
   'db:schemas',
+  'db:bulk-columns',
   'db:table-details',
   'db:query',
   'db:history:load',
@@ -122,6 +124,13 @@ const INVOKE_CHANNELS = [
   'db:row:update',
   'db:row:insert',
   'db:row:delete',
+  // Schema Mutations
+  'db:index:drop',
+  'db:fk:drop',
+  'db:pk:drop',
+  'db:index:create',
+  'db:fk:create',
+  'db:pk:create',
   // Monitoring
   'db:monitor:stats'
 ]

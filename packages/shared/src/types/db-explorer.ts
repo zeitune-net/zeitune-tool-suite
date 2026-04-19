@@ -117,7 +117,7 @@ export interface QueryHistoryEntry {
 
 // ── Data Browser ───────────────────────────────────────────────────────────
 
-export type FilterOperator = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'LIKE' | 'ILIKE' | 'IS NULL' | 'IS NOT NULL'
+export type FilterOperator = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'LIKE' | 'ILIKE' | 'NOT LIKE' | 'IN' | 'NOT IN' | 'BETWEEN' | 'IS NULL' | 'IS NOT NULL'
 
 export interface DataBrowserFilter {
   column: string

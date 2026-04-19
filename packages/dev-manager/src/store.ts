@@ -6,9 +6,11 @@ import type {
   ServiceRuntime,
   ServiceScanResult,
   ServiceStatus,
+  ExitReason,
   LogEntry,
   ViewMode,
-  DetailTab
+  DetailTab,
+  ScanProgress
 } from './types'
 import * as devIpc from './services/dev-ipc'
 
@@ -28,6 +30,7 @@ interface DevManagerStore {
   // Scanning
   scanning: boolean
   scanResults: ServiceScanResult[]
+  scanProgress: ScanProgress | null
   scanDirectory: (rootPath: string) => Promise<void>
   clearScan: () => void
 
@@ -77,6 +80,7 @@ interface DevManagerStore {
   // Port status
   portStatuses: Map<string, boolean> // serviceId -> available
   checkAllPorts: () => Promise<void>
+  refreshPortStatuses: () => Promise<void>
 
   // Service probe (auto-detection)
   probeServices: () => Promise<void>
@@ -84,7 +88,19 @@ interface DevManagerStore {
   // Log management
   appendLog: (serviceId: string, entry: LogEntry) => void
   clearLogs: (serviceId: string) => void
-  updateServiceStatus: (serviceId: string, status: ServiceStatus, pid?: number, error?: string) => void
+  updateServiceStatus: (
+    serviceId: string,
+    status: ServiceStatus,
+    extra?: {
+      pid?: number
+      error?: string
+      exitReason?: ExitReason
+      exitCode?: number | null
+      retryCount?: number
+      stuck?: boolean
+      waitingFor?: string[]
+    }
+  ) => void
 
   // Export/Import
   exportProfile: () => Promise<void>
@@ -105,7 +121,8 @@ function generateId(): string {
 }
 
 const MAX_LOG_LINES = 5000
-const TRIM_AMOUNT = 1000
+// Quantité conservée après trim (ring buffer). On garde les plus récents.
+const KEEP_AFTER_TRIM = 4000
 
 function mergeConfigsWithRuntime(
   configs: ServiceConfig[],
@@ -249,18 +266,19 @@ export const useDevManagerStore = create<DevManagerStore>()((set, get) => ({
 
   scanning: false,
   scanResults: [],
+  scanProgress: null,
 
   scanDirectory: async (rootPath) => {
-    set({ scanning: true, scanResults: [] })
+    set({ scanning: true, scanResults: [], scanProgress: null })
     try {
       const results = await devIpc.scanServices(rootPath)
-      set({ scanResults: results, scanning: false })
+      set({ scanResults: results, scanning: false, scanProgress: null })
     } catch {
-      set({ scanning: false })
+      set({ scanning: false, scanProgress: null })
     }
   },
 
-  clearScan: () => set({ scanResults: [] }),
+  clearScan: () => set({ scanResults: [], scanProgress: null }),
 
   // ── Service Runtime ─────────────────────────────────────────────────────
 
@@ -398,6 +416,24 @@ export const useDevManagerStore = create<DevManagerStore>()((set, get) => ({
         }
         return { portStatuses: next }
       })
+    } catch {
+      // Ignore errors
+    }
+  },
+
+  // Forcer une vérification de tous les ports (pas seulement ceux en 'stopped')
+  refreshPortStatuses: async () => {
+    const services = get().services
+    const portsToCheck = services
+      .filter((s) => s.config.port)
+      .map((s) => ({ serviceId: s.id, port: s.config.port! }))
+    if (portsToCheck.length === 0) return
+
+    try {
+      const results = await devIpc.checkPortBatch(portsToCheck)
+      set(() => ({
+        portStatuses: new Map(results.map((r) => [r.serviceId, r.available]))
+      }))
     } catch {
       // Ignore errors
     }
@@ -625,7 +661,7 @@ export const useDevManagerStore = create<DevManagerStore>()((set, get) => ({
           services: state.services.map((s) => {
             if (s.id !== serviceId) return s
             let logs = [...s.logs, entry]
-            if (logs.length > MAX_LOG_LINES) logs = logs.slice(TRIM_AMOUNT)
+            if (logs.length > MAX_LOG_LINES) logs = logs.slice(-KEEP_AFTER_TRIM)
             return { ...s, logs }
           })
         }
@@ -637,7 +673,7 @@ export const useDevManagerStore = create<DevManagerStore>()((set, get) => ({
         if (idx >= 0) {
           const updated = [...cached]
           let logs = [...updated[idx].logs, entry]
-          if (logs.length > MAX_LOG_LINES) logs = logs.slice(TRIM_AMOUNT)
+          if (logs.length > MAX_LOG_LINES) logs = logs.slice(-KEEP_AFTER_TRIM)
           updated[idx] = { ...updated[idx], logs }
           newCache[profileId] = updated
           return { runtimeCache: newCache }
@@ -655,22 +691,31 @@ export const useDevManagerStore = create<DevManagerStore>()((set, get) => ({
     }))
   },
 
-  updateServiceStatus: (serviceId, status, pid?, error?) => {
+  updateServiceStatus: (serviceId, status, extra = {}) => {
+    const { pid, error, exitReason, exitCode, retryCount, stuck, waitingFor } = extra
+    const applyUpdate = (s: ServiceRuntime): ServiceRuntime => {
+      let nextStartedAt = s.startedAt
+      if (status === 'starting') nextStartedAt = Date.now()
+      if (status === 'stopped' || status === 'error') nextStartedAt = undefined
+      return {
+        ...s,
+        status,
+        pid: pid ?? s.pid,
+        error: error ?? (status === 'error' ? s.error : undefined),
+        startedAt: nextStartedAt,
+        exitReason: exitReason ?? (status === 'starting' ? undefined : s.exitReason),
+        exitCode: exitCode !== undefined ? exitCode : s.exitCode,
+        retryCount: retryCount !== undefined ? retryCount : s.retryCount,
+        stuck: stuck !== undefined ? stuck : s.stuck,
+        waitingFor: status === 'waiting' ? waitingFor : undefined
+      }
+    }
+
     set((state) => {
       // Check active services first
       if (state.services.some((s) => s.id === serviceId)) {
         return {
-          services: state.services.map((s) =>
-            s.id === serviceId
-              ? {
-                  ...s,
-                  status,
-                  pid: pid ?? s.pid,
-                  error: error ?? (status === 'error' ? s.error : undefined),
-                  startedAt: status === 'running' ? Date.now() : s.startedAt
-                }
-              : s
-          )
+          services: state.services.map((s) => (s.id === serviceId ? applyUpdate(s) : s))
         }
       }
       // Route to runtime cache for non-active profiles
@@ -679,14 +724,7 @@ export const useDevManagerStore = create<DevManagerStore>()((set, get) => ({
         const idx = cached.findIndex((s) => s.id === serviceId)
         if (idx >= 0) {
           const updated = [...cached]
-          const s = updated[idx]
-          updated[idx] = {
-            ...s,
-            status,
-            pid: pid ?? s.pid,
-            error: error ?? (status === 'error' ? s.error : undefined),
-            startedAt: status === 'running' ? Date.now() : s.startedAt
-          }
+          updated[idx] = applyUpdate(updated[idx])
           newCache[profileId] = updated
           return { runtimeCache: newCache }
         }
@@ -752,12 +790,19 @@ export const useDevManagerStore = create<DevManagerStore>()((set, get) => ({
     })
 
     devIpc.onServiceStatus((data) => {
-      get().updateServiceStatus(
-        data.serviceId,
-        data.status as ServiceStatus,
-        data.pid,
-        data.error
-      )
+      get().updateServiceStatus(data.serviceId, data.status as ServiceStatus, {
+        pid: data.pid,
+        error: data.error,
+        exitReason: data.exitReason,
+        exitCode: data.exitCode,
+        retryCount: data.retryCount,
+        stuck: data.stuck,
+        waitingFor: data.waitingFor
+      })
+    })
+
+    devIpc.onScanProgress((data) => {
+      set({ scanProgress: data })
     })
   }
 }))

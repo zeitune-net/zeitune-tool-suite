@@ -157,7 +157,8 @@ function DashboardGrid() {
     error: 'border-red-500/30 bg-red-500/5',
     stopped: 'border-border',
     stopping: 'border-yellow-500/20 bg-yellow-500/5',
-    external: 'border-blue-400/30 bg-blue-400/5'
+    external: 'border-blue-400/30 bg-blue-400/5',
+    waiting: 'border-purple-400/30 bg-purple-400/5'
   }
 
   const statusDot: Record<string, string> = {
@@ -166,7 +167,8 @@ function DashboardGrid() {
     error: 'bg-red-500',
     stopped: 'bg-gray-500',
     stopping: 'bg-yellow-500 animate-pulse',
-    external: 'bg-blue-400'
+    external: 'bg-blue-400',
+    waiting: 'bg-purple-400 animate-pulse'
   }
 
   const handleCheckbox = (e: React.MouseEvent, serviceId: string) => {

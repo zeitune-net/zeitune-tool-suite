@@ -1,10 +1,10 @@
-import { ArrowLeft, Play, Square, RotateCw, Hammer } from 'lucide-react'
+import { ArrowLeft, Play, Square, RotateCw, Hammer, AlertTriangle } from 'lucide-react'
 import { Button } from '@shared/components/ui/button'
 import { Badge } from '@shared/components/ui/badge'
 import { cn } from '@shared/lib/utils'
 import { useDevManagerStore } from '../store'
 import { ServiceConfigEditor } from './ServiceConfigEditor'
-import type { ServiceStatus, ServiceConfig, DetailTab } from '../types'
+import type { ServiceStatus, ServiceConfig, DetailTab, ExitReason } from '../types'
 
 const statusLabels: Record<ServiceStatus, string> = {
   running: 'Running',
@@ -12,16 +12,30 @@ const statusLabels: Record<ServiceStatus, string> = {
   stopping: 'Stopping...',
   stopped: 'Stopped',
   error: 'Error',
-  external: 'Externe'
+  external: 'Externe',
+  waiting: 'En attente'
 }
 
-const statusBadgeVariant: Record<ServiceStatus, 'success' | 'warning' | 'destructive' | 'muted' | 'info'> = {
+const statusBadgeVariant: Record<ServiceStatus, 'success' | 'warning' | 'destructive' | 'muted' | 'info' | 'purple'> = {
   running: 'success',
   starting: 'warning',
   stopping: 'warning',
   stopped: 'muted',
   error: 'destructive',
-  external: 'info'
+  external: 'info',
+  waiting: 'purple'
+}
+
+const exitReasonLabel: Record<ExitReason, string> = {
+  normal: 'Arrêt normal',
+  crash: 'Crash',
+  killed: 'Arrêté manuellement'
+}
+
+const exitReasonVariant: Record<ExitReason, 'success' | 'destructive' | 'muted'> = {
+  normal: 'success',
+  crash: 'destructive',
+  killed: 'muted'
 }
 
 const tabs: { id: DetailTab; label: string }[] = [
@@ -79,6 +93,21 @@ export function ServiceDetail() {
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-semibold">{svc.config.name}</h2>
               <Badge variant={statusBadgeVariant[svc.status]}>{statusLabels[svc.status]}</Badge>
+              {svc.stuck && (
+                <Badge variant="destructive" className="gap-1">
+                  <AlertTriangle className="h-2.5 w-2.5" />
+                  STUCK
+                </Badge>
+              )}
+              {svc.status === 'error' && !svc.stuck && svc.retryCount !== undefined && svc.retryCount > 0 && (
+                <Badge variant="warning">retry {svc.retryCount}</Badge>
+              )}
+              {svc.exitReason && svc.status === 'stopped' && (
+                <Badge variant={exitReasonVariant[svc.exitReason]}>
+                  {exitReasonLabel[svc.exitReason]}
+                  {svc.exitCode !== undefined && svc.exitCode !== null && ` (${svc.exitCode})`}
+                </Badge>
+              )}
               {svc.config.port && (
                 <a
                   href={`http://localhost:${svc.config.port}`}
@@ -93,6 +122,11 @@ export function ServiceDetail() {
             </div>
             {svc.status === 'error' && svc.error && (
               <p className="text-[10px] text-red-400">{svc.error}</p>
+            )}
+            {svc.status === 'waiting' && svc.waitingFor && svc.waitingFor.length > 0 && (
+              <p className="text-[10px] text-purple-400">
+                En attente de : {svc.waitingFor.join(', ')}
+              </p>
             )}
           </div>
         </div>
@@ -256,6 +290,21 @@ export function ServiceDetail() {
                     <Badge variant={svc.healthStatus === 'healthy' ? 'success' : 'destructive'}>
                       {svc.healthStatus === 'healthy' ? 'Healthy' : 'Unhealthy'}
                     </Badge>
+                  </div>
+                )}
+                {svc.exitReason && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Dernière sortie</span>
+                    <Badge variant={exitReasonVariant[svc.exitReason]}>
+                      {exitReasonLabel[svc.exitReason]}
+                      {svc.exitCode !== undefined && svc.exitCode !== null && ` (${svc.exitCode})`}
+                    </Badge>
+                  </div>
+                )}
+                {svc.retryCount !== undefined && svc.retryCount > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Retries auto</span>
+                    <span className="font-mono">{svc.retryCount}</span>
                   </div>
                 )}
               </div>

@@ -9,6 +9,7 @@ import type {
   QueryTab,
   QueryHistoryEntry,
   DataBrowserFilter,
+  FilterOperator,
   PageSize,
   ExportFormat,
   SnapshotMetadata,
@@ -26,6 +27,7 @@ import type {
 } from '@shared/types'
 import type { PublicProfile } from './services/db-ipc'
 import * as dbIpc from './services/db-ipc'
+import { inferColumnKind, formatSqlLiteral } from '@shared/lib/column-kind'
 
 // ── View Types ──────────────────────────────────────────────────────────────
 
@@ -79,11 +81,13 @@ interface DbExplorerStore {
   testConnection: (conn: DbConnectionEntry) => Promise<ConnectionTestResult>
   connectToDb: (conn: DbConnectionEntry) => Promise<boolean>
   disconnectFromDb: (conn: DbConnectionEntry) => Promise<void>
-  testAllConnections: (connections: DbConnectionEntry[]) => Promise<void>
+  testAllConnections: (connections: DbConnectionEntry[]) => Promise<Record<string, ConnectionTestResult>>
 
   // Schema
   schemas: Record<string, DatabaseSchema>
+  schemaColumns: Record<string, Record<string, string[]>>
   loadSchemas: (conn: DbConnectionEntry) => Promise<void>
+  loadSchemaColumns: (conn: DbConnectionEntry, schema: string) => Promise<void>
   selectedSchema: string | null
   setSelectedSchema: (schema: string | null) => void
   selectedTable: string | null
@@ -295,17 +299,32 @@ export const useDbExplorerStore = create<DbExplorerStore>()((set, get) => ({
     }))
   },
   testAllConnections: async (connections) => {
-    await Promise.all(connections.map((conn) => get().testConnection(conn)))
+    const results = await Promise.all(
+      connections.map(async (conn) => [conn.id, await get().testConnection(conn)] as const)
+    )
+    return Object.fromEntries(results)
   },
 
   // Schema
   schemas: {},
+  schemaColumns: {},
   loadSchemas: async (conn) => {
     const dbSchema = await dbIpc.getSchemas(conn)
+    const firstSchema = dbSchema.schemas.length > 0 ? dbSchema.schemas[0].name : null
     set((s) => ({
       schemas: { ...s.schemas, [conn.id]: dbSchema },
-      selectedSchema: dbSchema.schemas.length > 0 ? dbSchema.schemas[0].name : null
+      selectedSchema: firstSchema
     }))
+    if (firstSchema) {
+      // Background fetch — powers SQL autocomplete without waiting on table clicks
+      get().loadSchemaColumns(conn, firstSchema).catch(() => {})
+    }
+  },
+  loadSchemaColumns: async (conn, schema) => {
+    const key = `${conn.id}:${schema}`
+    if (get().schemaColumns[key]) return
+    const cols = await dbIpc.getBulkColumns(conn, schema)
+    set((s) => ({ schemaColumns: { ...s.schemaColumns, [key]: cols } }))
   },
   selectedSchema: null,
   setSelectedSchema: (schema) => set({ selectedSchema: schema, selectedTable: null }),
@@ -442,7 +461,7 @@ export const useDbExplorerStore = create<DbExplorerStore>()((set, get) => ({
   setDataBrowserPage: (page) => set({ dataBrowserPage: page }),
   setDataBrowserPageSize: (size) => set({ dataBrowserPageSize: size, dataBrowserPage: 0 }),
   loadDataBrowserPage: async (conn) => {
-    const { dataBrowserSchema, dataBrowserTable, dataBrowserFilters, dataBrowserSortColumn, dataBrowserSortDir, dataBrowserPage, dataBrowserPageSize } = get()
+    const { dataBrowserSchema, dataBrowserTable, dataBrowserFilters, dataBrowserSortColumn, dataBrowserSortDir, dataBrowserPage, dataBrowserPageSize, tableDetails } = get()
     if (!dataBrowserSchema || !dataBrowserTable) return
 
     set({ dataBrowserLoading: true })
@@ -456,15 +475,43 @@ export const useDbExplorerStore = create<DbExplorerStore>()((set, get) => ({
       ? q(dataBrowserTable)
       : `${q(dataBrowserSchema)}.${q(dataBrowserTable)}`
 
-    // Build WHERE clause with escaped values
-    const escapeValue = (v: string) => v.replace(/'/g, "''")
-    const whereClauseRaw = dataBrowserFilters.length > 0
-      ? ` WHERE ${dataBrowserFilters.map((f) => {
-          if (f.operator === 'IS NULL') return `${q(f.column)} IS NULL`
-          if (f.operator === 'IS NOT NULL') return `${q(f.column)} IS NOT NULL`
-          return `${q(f.column)} ${f.operator} '${escapeValue(f.value)}'`
-        }).join(' AND ')}`
-      : ''
+    // Build WHERE clause en s'appuyant sur le type de chaque colonne
+    const detailKey = `${conn.id}:${dataBrowserSchema}.${dataBrowserTable}`
+    const details = tableDetails[detailKey]
+    const typeByCol: Record<string, string> = {}
+    for (const c of details?.columns ?? []) typeByCol[c.name] = c.type
+
+    const kindOf = (column: string) => inferColumnKind(typeByCol[column])
+    const formatLit = (raw: string, column: string, operator: FilterOperator): string | null => {
+      // LIKE/ILIKE/NOT LIKE → toujours chaîne (pattern matching)
+      const isLike = operator === 'LIKE' || operator === 'ILIKE' || operator === 'NOT LIKE'
+      const kind = isLike ? 'string' : kindOf(column)
+      return formatSqlLiteral(raw, kind, conn.type)
+    }
+
+    const whereParts: string[] = []
+    for (const f of dataBrowserFilters) {
+      if (f.operator === 'IS NULL') { whereParts.push(`${q(f.column)} IS NULL`); continue }
+      if (f.operator === 'IS NOT NULL') { whereParts.push(`${q(f.column)} IS NOT NULL`); continue }
+      if (f.operator === 'IN' || f.operator === 'NOT IN') {
+        const parts = f.value.split(',')
+          .map((v) => formatLit(v, f.column, f.operator))
+          .filter((v): v is string => v !== null)
+        if (parts.length === 0) continue // filtre vide ignoré
+        whereParts.push(`${q(f.column)} ${f.operator} (${parts.join(', ')})`)
+        continue
+      }
+      if (f.operator === 'BETWEEN') {
+        const [a, b] = f.value.split(',').map((v) => formatLit(v, f.column, f.operator))
+        if (!a || !b) continue
+        whereParts.push(`${q(f.column)} BETWEEN ${a} AND ${b}`)
+        continue
+      }
+      const lit = formatLit(f.value, f.column, f.operator)
+      if (lit === null) continue // valeur vide ou invalide → filtre ignoré
+      whereParts.push(`${q(f.column)} ${f.operator} ${lit}`)
+    }
+    const whereClauseRaw = whereParts.length > 0 ? ` WHERE ${whereParts.join(' AND ')}` : ''
 
     const orderClause = dataBrowserSortColumn
       ? ` ORDER BY ${q(dataBrowserSortColumn)} ${dataBrowserSortDir.toUpperCase()}`

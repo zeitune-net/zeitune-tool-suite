@@ -148,17 +148,11 @@ export function ProfileManager() {
   }
 
   const handleConnect = async (profile: PublicProfile) => {
-    await testAllConnections(profile.connections)
-    const anySuccess = profile.connections.some(
-      (c) => connectionStates[c.id]?.status === 'connected'
-    )
-    if (anySuccess) {
-      setActiveProfileId(profile.id)
-      const first = profile.connections.find(
-        (c) => connectionStates[c.id]?.status === 'connected'
-      )
-      if (first) await connectToDb(first)
-    }
+    const results = await testAllConnections(profile.connections)
+    const first = profile.connections.find((c) => results[c.id]?.success)
+    if (!first) return
+    setActiveProfileId(profile.id)
+    await connectToDb(first)
   }
 
   // ── Connection editor helpers ─────────────────────────────────────────

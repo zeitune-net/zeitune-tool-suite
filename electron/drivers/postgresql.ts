@@ -120,10 +120,15 @@ export const postgresqlDriver: DbDriver = {
   },
 
   async getIndexes(pool: pg.Pool, schema: string, table: string): Promise<IndexInfo[]> {
+    // Utilise pg_get_indexdef(indexrelid, ordinal, pretty) pour obtenir chaque
+    // colonne indexée — fonctionne pour colonnes simples, INCLUDE, et
+    // expressions (cas où indkey=0, qui cassait l'ancienne requête).
+    // Cast indkey::int[] pour éviter les soucis d'unnest sur int2vector selon
+    // les versions PG.
     const res = await pool.query(
       `SELECT
          i.relname AS index_name,
-         array_agg(a.attname ORDER BY k.n) AS columns,
+         coalesce(array_agg(pg_get_indexdef(ix.indexrelid, k.ord::int, true) ORDER BY k.ord), ARRAY[]::text[]) AS columns,
          ix.indisunique AS is_unique,
          am.amname AS index_type
        FROM pg_catalog.pg_index ix
@@ -131,19 +136,24 @@ export const postgresqlDriver: DbDriver = {
        JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
        JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
        JOIN pg_catalog.pg_am am ON am.oid = i.relam
-       CROSS JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, n)
-       JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+       LEFT JOIN LATERAL unnest(ix.indkey::int[]) WITH ORDINALITY AS k(attnum, ord) ON true
        WHERE n.nspname = $1 AND t.relname = $2
        GROUP BY i.relname, ix.indisunique, am.amname
        ORDER BY i.relname`,
       [schema, table]
     )
-    return res.rows.map((r: Record<string, unknown>) => ({
-      name: r.index_name as string,
-      columns: r.columns as string[],
-      unique: r.is_unique as boolean,
-      type: r.index_type as string
-    }))
+    return res.rows.map((r: Record<string, unknown>) => {
+      const rawCols = r.columns
+      const columns = Array.isArray(rawCols)
+        ? (rawCols as unknown[]).map((c) => (c == null ? '' : String(c))).filter(Boolean)
+        : []
+      return {
+        name: String(r.index_name ?? ''),
+        columns,
+        unique: Boolean(r.is_unique),
+        type: String(r.index_type ?? '')
+      }
+    })
   },
 
   async getRowEstimate(pool: pg.Pool, schema: string, table: string): Promise<number> {

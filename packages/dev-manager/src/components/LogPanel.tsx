@@ -1,25 +1,31 @@
 import { useState, useRef, useEffect } from 'react'
-import { X, Trash2, Search, ArrowDownToLine, Lock, Unlock } from 'lucide-react'
+import { X, Trash2, Search, Lock, Unlock, Regex, Download } from 'lucide-react'
 import { Button } from '@shared/components/ui/button'
 import { Badge } from '@shared/components/ui/badge'
 import { cn } from '@shared/lib/utils'
 import { useDevManagerStore } from '../store'
-import type { ServiceRuntime, ServiceStatus } from '../types'
+import type { ServiceStatus } from '../types'
 
-const statusBadgeVariant: Record<ServiceStatus, 'success' | 'warning' | 'destructive' | 'muted'> = {
+const statusBadgeVariant: Record<ServiceStatus, 'success' | 'warning' | 'destructive' | 'muted' | 'info' | 'purple'> = {
   running: 'success',
   starting: 'warning',
   stopping: 'warning',
   stopped: 'muted',
-  error: 'destructive'
+  error: 'destructive',
+  external: 'info',
+  waiting: 'purple'
 }
 
 const MAX_VISIBLE_LINES = 500
+
+type StreamFilter = 'all' | 'stdout' | 'stderr' | 'system'
 
 export function LogPanel() {
   const { services, logPanelOpen, setLogPanelOpen, clearLogs } = useDevManagerStore()
   const [activeTab, setActiveTab] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [useRegex, setUseRegex] = useState(false)
+  const [streamFilter, setStreamFilter] = useState<StreamFilter>('all')
   const [autoScroll, setAutoScroll] = useState(true)
   const [panelHeight, setPanelHeight] = useState(280)
   const logEndRef = useRef<HTMLDivElement>(null)
@@ -49,11 +55,50 @@ export function LogPanel() {
   const activeService = services.find((s) => s.id === activeTab)
   const logs = activeService?.logs || []
 
-  // Filter + limit
-  const filteredLogs = search
-    ? logs.filter((l) => l.text.toLowerCase().includes(search.toLowerCase()))
-    : logs
+  // Compile regex safely (invalid regex → no match)
+  const searchRegex: RegExp | null = (() => {
+    if (!search) return null
+    if (!useRegex) return null
+    try {
+      return new RegExp(search, 'i')
+    } catch {
+      return null
+    }
+  })()
+  const regexInvalid = useRegex && !!search && !searchRegex
+
+  // Filter by stream + search
+  let filteredLogs = logs
+  if (streamFilter !== 'all') {
+    filteredLogs = filteredLogs.filter((l) => l.stream === streamFilter)
+  }
+  if (search && !regexInvalid) {
+    if (searchRegex) {
+      filteredLogs = filteredLogs.filter((l) => searchRegex.test(l.text))
+    } else {
+      const needle = search.toLowerCase()
+      filteredLogs = filteredLogs.filter((l) => l.text.toLowerCase().includes(needle))
+    }
+  }
   const visibleLogs = filteredLogs.slice(-MAX_VISIBLE_LINES)
+
+  const handleExport = () => {
+    if (!activeService) return
+    const content = filteredLogs
+      .map((l) => {
+        const d = new Date(l.timestamp).toISOString()
+        return `[${d}] [${l.stream}] ${l.text}`
+      })
+      .join('\n')
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const ts = new Date().toISOString().replace(/[:.]/g, '-')
+    a.href = url
+    a.download = `${activeService.config.name}-${ts}.log`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
 
   // Resize logic
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -126,16 +171,44 @@ export function LogPanel() {
           ))}
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          {/* Stream filter */}
+          <select
+            value={streamFilter}
+            onChange={(e) => setStreamFilter(e.target.value as StreamFilter)}
+            className="h-6 rounded border border-border bg-input px-1 text-[10px] font-mono focus:border-primary focus:outline-none"
+            title="Filtrer par stream"
+          >
+            <option value="all">all</option>
+            <option value="stdout">stdout</option>
+            <option value="stderr">stderr</option>
+            <option value="system">system</option>
+          </select>
           {/* Search */}
           <div className="relative">
             <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filtrer..."
-              className="h-6 w-32 rounded border border-border bg-input pl-6 pr-2 text-[10px] font-mono focus:border-primary focus:outline-none"
+              placeholder={useRegex ? '^error|fatal' : 'Filtrer...'}
+              className={cn(
+                'h-6 w-32 rounded border bg-input pl-6 pr-2 text-[10px] font-mono focus:outline-none',
+                regexInvalid
+                  ? 'border-red-500 focus:border-red-500'
+                  : 'border-border focus:border-primary'
+              )}
+              title={regexInvalid ? 'Regex invalide' : undefined}
             />
           </div>
+          {/* Regex toggle */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={() => setUseRegex(!useRegex)}
+            title={useRegex ? 'Regex ON' : 'Regex OFF'}
+          >
+            <Regex className={cn('h-3 w-3', useRegex && 'text-primary')} />
+          </Button>
           {/* Auto-scroll toggle */}
           <Button
             variant="ghost"
@@ -150,6 +223,18 @@ export function LogPanel() {
               <Unlock className="h-3 w-3" />
             )}
           </Button>
+          {/* Export */}
+          {activeTab && filteredLogs.length > 0 && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={handleExport}
+              title="Exporter les logs filtrés (.log)"
+            >
+              <Download className="h-3 w-3" />
+            </Button>
+          )}
           {/* Clear */}
           {activeTab && (
             <Button
@@ -200,8 +285,8 @@ export function LogPanel() {
                     entry.stream === 'system' && 'text-muted-foreground italic'
                   )}
                 >
-                  {search
-                    ? highlightMatch(entry.text, search)
+                  {search && !regexInvalid
+                    ? highlightMatch(entry.text, search, useRegex)
                     : entry.text}
                 </span>
               </div>
@@ -214,15 +299,23 @@ export function LogPanel() {
   )
 }
 
-function highlightMatch(text: string, search: string): React.ReactNode {
-  const regex = new RegExp(`(${search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
+function highlightMatch(text: string, search: string, isRegex: boolean): React.ReactNode {
+  let regex: RegExp
+  try {
+    const pattern = isRegex ? `(${search})` : `(${search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`
+    regex = new RegExp(pattern, 'gi')
+  } catch {
+    return text
+  }
   const parts = text.split(regex)
   if (parts.length === 1) return text
 
+  // Reset regex lastIndex state before reuse for .test()
+  const testRegex = new RegExp(regex.source, 'i')
   return (
     <>
       {parts.map((part, i) =>
-        regex.test(part) ? (
+        testRegex.test(part) ? (
           <mark key={i} className="bg-yellow-500/30 text-foreground rounded px-0.5">
             {part}
           </mark>

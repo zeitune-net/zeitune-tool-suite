@@ -1,4 +1,12 @@
-import type { DevProfile, ServiceConfig, ServiceScanResult, PortCheckResult, LogEntry, ServiceStatus } from '../types'
+import type {
+  DevProfile,
+  ServiceScanResult,
+  PortCheckResult,
+  LogEntry,
+  ServiceStatus,
+  ExitReason,
+  ScanProgress
+} from '../types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const getIpc = () => (window as any).electron.ipcRenderer
@@ -115,5 +123,19 @@ export const onServiceLog = (
 ) => on('dev:service:log', callback as (...args: unknown[]) => void)
 
 export const onServiceStatus = (
-  callback: (data: { serviceId: string; status: ServiceStatus; pid?: number; error?: string }) => void
+  callback: (data: {
+    serviceId: string
+    status: ServiceStatus
+    pid?: number
+    error?: string
+    exitReason?: ExitReason
+    exitCode?: number | null
+    retryCount?: number
+    stuck?: boolean
+    waitingFor?: string[]
+  }) => void
 ) => on('dev:service:status', callback as (...args: unknown[]) => void)
+
+export const onScanProgress = (
+  callback: (data: ScanProgress) => void
+) => on('dev:scan:progress', callback as (...args: unknown[]) => void)

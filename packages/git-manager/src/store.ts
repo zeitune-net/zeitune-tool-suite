@@ -68,6 +68,7 @@ interface GitManagerStore {
   batchPush: (branch?: string) => Promise<void>
   batchCheckout: (branch: string) => Promise<void>
   batchCommit: (message: string) => Promise<void>
+  batchMerge: (sourceBranch: string, targetBranch?: string) => Promise<void>
 
   // ── Repo config / settings ────────────────────────────────────────────────
   repoConfig: RepoConfigResult | null
@@ -562,6 +563,57 @@ export const useGitManagerStore = create<GitManagerStore>()((set, get) => ({
     const fail = results.length - ok
     if (fail === 0) toast.success(`Commit : ${ok} repos`)
     else toast.warning(`Commit : ${ok} OK, ${fail} erreurs`)
+    get().refreshAllRepos()
+  },
+
+  batchMerge: async (sourceBranch, targetBranch?) => {
+    if (get().batchLoading) return
+    if (!sourceBranch) {
+      toast.warning('Branche source requise')
+      return
+    }
+    const selected = get().selectedRepoPaths
+    const repos = get().repositories.filter((r) => selected.includes(r.path))
+    set({ batchLoading: true, batchResults: [] })
+    const results: BatchOperationResult[] = await Promise.all(
+      repos.map(async (r) => {
+        try {
+          if (targetBranch && r.branch !== targetBranch) {
+            if (!r.branches.includes(targetBranch)) {
+              return {
+                repoPath: r.path,
+                repoName: r.name,
+                success: false,
+                message: `Branche cible "${targetBranch}" absente`
+              }
+            }
+            await gitIpc.checkout(r.path, targetBranch)
+          }
+          const res = await gitIpc.merge(r.path, sourceBranch)
+          return {
+            repoPath: r.path,
+            repoName: r.name,
+            success: res.success,
+            message: res.success
+              ? `Merge ${sourceBranch} → ${targetBranch || r.branch}`
+              : res.message,
+            conflicts: res.conflicts
+          }
+        } catch (err) {
+          return {
+            repoPath: r.path,
+            repoName: r.name,
+            success: false,
+            message: err instanceof Error ? err.message : String(err)
+          }
+        }
+      })
+    )
+    set({ batchResults: results, batchLoading: false })
+    const ok = results.filter((r) => r.success).length
+    const fail = results.length - ok
+    if (fail === 0) toast.success(`Merge ${sourceBranch} : ${ok} repos`)
+    else toast.warning(`Merge : ${ok} OK, ${fail} erreurs/conflits`)
     get().refreshAllRepos()
   },
 
